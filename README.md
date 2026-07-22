@@ -12,9 +12,10 @@ agents: copy the files, follow the recipe, wire the few project-specific seams.
 | Resource | What it gives you | Stack |
 |---|---|---|
 | [**bKash · Nagad · Rocket — Send-Money Checkout**](./bkash-nagad-rocket-payment-kit/) | Pixel-faithful Bangladeshi MFS payment method picker + send-money popup, with logos bundled | React + TypeScript |
+| [**Email Setup (Gmail API + SMTP fallback)**](./gmail-api-email-setup-kit/) | Admin panel: analytics + settings + A-to-Z setup guide + test sender; sends over HTTPS so it works even where SMTP ports are blocked | React + Laravel |
 
 _More resources coming: Continue-with-Google OAuth, login/registration flow,
-email (API + SMTP) setup, and more._
+and more._
 
 ## 🤖 How to use with an AI agent
 
