@@ -15,6 +15,7 @@ agents: copy the files, follow the recipe, wire the few project-specific seams.
 | [**Email Setup (Gmail API + SMTP fallback)**](./gmail-api-email-setup-kit/) | Admin panel: analytics + settings + A-to-Z setup guide + test sender; sends over HTTPS so it works even where SMTP ports are blocked | React + Laravel |
 | [**Continue with Google (OAuth)**](./continue-with-google-oauth-kit/) | Secure "Continue with Google" button + server-side token verification + login/register two-step flow | React + Laravel |
 | [**GitHub Actions Auto-Deploy**](./github-actions-laravel-deploy-kit/) | Push to `master` → tested, built, rsynced, migrated behind a DB backup, every cache busted. Includes the SSH-key + repository-secrets walkthrough | GitHub Actions + Laravel + Vite |
+| [**Laravel Auto-Deploy — cPanel / shared hosting (no SSH)**](./cpanel-ftp-laravel-deploy-kit/) | The same push-to-live pipeline for hosting that only gives you FTP: builds on the runner, ships the release as **one zip** instead of 25,000 FTP transfers (the 30–50 minute first deploy), then unpacks and migrates through a token-protected PHP hook | GitHub Actions + Laravel + cPanel |
 
 _More resources coming: login/registration flow, and more._
 

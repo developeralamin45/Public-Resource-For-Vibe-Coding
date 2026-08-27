@@ -1,0 +1,10 @@
+node_modules/
+vendor/
+dist/
+.DS_Store
+*.log
+.env
+.env.*
+deploy.zip
+release.tar.gz
+deploy-version.txt

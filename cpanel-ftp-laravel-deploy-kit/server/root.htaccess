@@ -1,0 +1,40 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  Root .htaccess  →  upload to the SITE ROOT (the folder that holds app/,
+#  public/, vendor/ …), i.e. the same folder deploy.zip is unpacked into.
+#
+#  ONLY needed when your hosting points the domain at the project root instead
+#  of at public/ — the normal cPanel "addon domain / subdomain folder" layout.
+#  If you CAN set the document root to <project>/public (CloudPanel, Plesk,
+#  cPanel main domain), do that instead and set UPLOAD_ROOT_HTACCESS=false.
+#
+#  This file also makes /deploy-hook.php reachable: the rewrite below is what
+#  maps it to public/deploy-hook.php.
+# ═══════════════════════════════════════════════════════════════════════════
+
+Options -Indexes
+
+# ── Safety net ────────────────────────────────────────────────────────────
+# The rewrite below already hides these (they become public/<name> → 404), but
+# if mod_rewrite is ever disabled this keeps .env and the release zip private.
+<FilesMatch "^(\.env.*|deploy\.zip|release\.tar\.gz|deploy-version\.txt|composer\.(json|lock)|package(-lock)?\.json|artisan|\.gitignore|.*\.md)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Redirect trailing slashes if not a folder
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_URI} (.+)/$
+    RewriteRule ^ %1 [L,R=301]
+
+    # Send every request into public/ — Laravel's real web root
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ public/$1 [L,QSA]
+</IfModule>

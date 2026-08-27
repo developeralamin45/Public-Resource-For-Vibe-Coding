@@ -1,0 +1,724 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  Laravel → cPanel / shared hosting  ·  "build on runner, ship ONE zip"
+#  Kit: cpanel-ftp-laravel-deploy-kit  (Public-Resource-For-Vibe-Coding)
+#  Have SSH on the server? Use github-actions-laravel-deploy-kit instead.
+#
+#  Copy this file to  .github/workflows/deploy.yml  in your project.
+#  Nothing in here needs editing for a standard Laravel + Vite app — every
+#  project-specific value comes from GitHub Secrets / Variables (see SECRETS.md).
+#  The one block you may want to extend is "STEP 5 — production .env".
+#
+#  WHY A ZIP: FTP-uploading a built Laravel app file-by-file means ~25,000
+#  small files over a serial FTP control channel — that is the 30–50 minute
+#  first deploy everyone hits. One ~30 MB zip is a single transfer (<60 s),
+#  and a tiny PHP hook on the server unpacks it. Same result, ~40x faster.
+# ═══════════════════════════════════════════════════════════════════════════
+
+name: Deploy (FTP → cPanel)
+
+on:
+  push:
+    branches: [ main ]        # ← change if you deploy from another branch
+  workflow_dispatch:          # lets you re-deploy by hand from the Actions tab
+
+# Never let two deploys interleave: half-run migrations are much worse than
+# a queued deploy. Deliberately NOT cancel-in-progress.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build → zip → upload → unzip → migrate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    # ─────────────────────────────────────────────────────────────────────
+    # 1. CHECKOUT
+    # ─────────────────────────────────────────────────────────────────────
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # ─────────────────────────────────────────────────────────────────────
+    # 1b. FAIL FAST ON MISSING CONFIG
+    #     Without this, a forgotten secret surfaces 4 minutes later as an
+    #     opaque FTP or curl error. See SECRETS.md for every name.
+    # ─────────────────────────────────────────────────────────────────────
+    - name: Validate secrets and variables
+      env:
+        APP_KEY:        ${{ secrets.APP_KEY }}
+        FTP_HOST:       ${{ secrets.FTP_HOST }}
+        FTP_USERNAME:   ${{ secrets.FTP_USERNAME }}
+        FTP_PASSWORD:   ${{ secrets.FTP_PASSWORD }}
+        DB_DATABASE:    ${{ secrets.DB_DATABASE }}
+        DB_USERNAME:    ${{ secrets.DB_USERNAME }}
+        DB_PASSWORD:    ${{ secrets.DB_PASSWORD }}
+        DEPLOY_SECRET:  ${{ secrets.DEPLOY_SECRET }}
+        APP_URL:        ${{ vars.APP_URL }}
+        FTP_SERVER_DIR: ${{ vars.FTP_SERVER_DIR }}
+      run: |
+        set -uo pipefail
+        MISSING=0
+        for name in APP_KEY FTP_HOST FTP_USERNAME FTP_PASSWORD \
+                    DB_DATABASE DB_USERNAME DB_PASSWORD DEPLOY_SECRET; do
+          if [ -z "${!name:-}" ]; then echo "::error::Missing secret: $name"; MISSING=1; fi
+        done
+
+        if [ -z "${APP_URL:-}" ]; then
+          echo "::error::Missing variable: APP_URL (e.g. https://example.com)"; MISSING=1
+        fi
+
+        if [ -z "${FTP_SERVER_DIR:-}" ]; then
+          echo "::error::Missing variable: FTP_SERVER_DIR — the FTP path holding artisan/ and public/, e.g. /example.com/"
+          MISSING=1
+        elif [ "${FTP_SERVER_DIR: -1}" != "/" ]; then
+          echo "::error::FTP_SERVER_DIR must end with a trailing slash: '${FTP_SERVER_DIR}/'"
+          MISSING=1
+        fi
+
+        case "$APP_KEY" in
+          base64:*) ;;
+          "")       ;;
+          *) echo "::warning::APP_KEY does not start with 'base64:' — copy the whole value from 'php artisan key:generate --show'." ;;
+        esac
+
+        [ "$MISSING" = "0" ] || { echo "See SECRETS.md for what each name means."; exit 1; }
+        echo "configuration OK"
+
+    # ─────────────────────────────────────────────────────────────────────
+    # 2. BUILD PHP DEPENDENCIES (vendor/)
+    #    Built HERE, not on the server. Shared hosts ship old/ memory-capped
+    #    composer binaries; building on the runner is deterministic and the
+    #    result is identical for every deploy.
+    # ─────────────────────────────────────────────────────────────────────
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ vars.PHP_VERSION || '8.2' }}
+        extensions: mbstring, xml, ctype, iconv, intl, dom, filter, gd, json, libxml, pdo, pdo_mysql, zip, bcmath, fileinfo
+        coverage: none
+
+    - name: Install Composer dependencies (production)
+      run: composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist --no-progress
+
+    # ─────────────────────────────────────────────────────────────────────
+    # 3. BUILD FRONTEND (public/build/)
+    # ─────────────────────────────────────────────────────────────────────
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ vars.NODE_VERSION || '20' }}
+
+    - name: Build frontend assets
+      run: |
+        set -e
+        if [ -f package-lock.json ]; then npm ci; else npm install; fi
+        npm run build
+
+    # ─────────────────────────────────────────────────────────────────────
+    # 4. STAMP THE RELEASE
+    #    Lets you ask the live server "which commit are you running?"
+    #    via  ?action=health  — invaluable when a deploy silently no-ops.
+    # ─────────────────────────────────────────────────────────────────────
+    - name: Stamp release version
+      run: |
+        printf '%s | %s | run #%s | %s\n' \
+          "${{ github.sha }}" "${{ github.ref_name }}" "${{ github.run_number }}" "$(date -u +%FT%TZ)" \
+          > deploy-version.txt
+        cat deploy-version.txt
+
+    # ─────────────────────────────────────────────────────────────────────
+    # 5. PRODUCTION .env
+    #    Generated from secrets on every deploy — the repo never contains it,
+    #    and the server copy is always in sync with what GitHub holds.
+    #    ⚠ Do NOT hand-edit .env on the server; it is overwritten each deploy.
+    #       Put extra keys in the EXTRA_ENV secret instead (see SECRETS.md).
+    #    The heredoc is QUOTED ('ENVEOF') so $ and " inside secrets are literal.
+    # ─────────────────────────────────────────────────────────────────────
+    - name: Create production .env
+      run: |
+        cat > .env << 'ENVEOF'
+        APP_NAME="${{ vars.APP_NAME || 'Laravel' }}"
+        APP_ENV=production
+        APP_KEY=${{ secrets.APP_KEY }}
+        APP_DEBUG=${{ vars.APP_DEBUG || 'false' }}
+        APP_URL=${{ vars.APP_URL }}
+        APP_TIMEZONE=${{ vars.APP_TIMEZONE || 'UTC' }}
+
+        APP_LOCALE=${{ vars.APP_LOCALE || 'en' }}
+        APP_FALLBACK_LOCALE=en
+        APP_FAKER_LOCALE=en_US
+
+        LOG_CHANNEL=stack
+        LOG_STACK=single
+        LOG_LEVEL=${{ vars.LOG_LEVEL || 'error' }}
+
+        DB_CONNECTION=mysql
+        DB_HOST=${{ vars.DB_HOST || '127.0.0.1' }}
+        DB_PORT=${{ vars.DB_PORT || '3306' }}
+        DB_DATABASE=${{ secrets.DB_DATABASE }}
+        DB_USERNAME=${{ secrets.DB_USERNAME }}
+        DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+
+        SESSION_DRIVER=database
+        SESSION_LIFETIME=120
+        CACHE_STORE=database
+        QUEUE_CONNECTION=database
+        FILESYSTEM_DISK=public
+
+        MAIL_MAILER=${{ vars.MAIL_MAILER || 'log' }}
+        MAIL_FROM_ADDRESS="${{ vars.MAIL_FROM_ADDRESS || 'hello@example.com' }}"
+        MAIL_FROM_NAME="${{ vars.APP_NAME || 'Laravel' }}"
+
+        VITE_APP_NAME="${{ vars.APP_NAME || 'Laravel' }}"
+
+        # ── anything extra (mail creds, API keys, seeder admin, …) ──
+        ${{ secrets.EXTRA_ENV }}
+        ENVEOF
+        # Show the shape of the file without ever printing values.
+        echo "Generated .env keys:"; grep -oE '^[A-Z_]+=' .env | tr -d '=' | sort | tr '\n' ' '; echo
+
+    # ─────────────────────────────────────────────────────────────────────
+    # 6. GENERATE THE SERVER-SIDE DEPLOY HOOK
+    #    Goes inside public/ so it is web-reachable; dirname(__DIR__) is then
+    #    the project root. Only the sha256 of DEPLOY_SECRET is written to the
+    #    server — the plaintext token never leaves GitHub.
+    #    (Readable mirror of this PHP: server/deploy-hook.php in the kit.)
+    # ─────────────────────────────────────────────────────────────────────
+    - name: Generate public/deploy-hook.php
+      env:
+        DEPLOY_SECRET: ${{ secrets.DEPLOY_SECRET }}
+      run: |
+        set -euo pipefail
+
+        # Trim stray whitespace/newlines that sneak in when pasting secrets.
+        TOKEN="$(printf '%s' "$DEPLOY_SECRET" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        if [ -z "$TOKEN" ]; then echo "::error::DEPLOY_SECRET is empty"; exit 1; fi
+        SECRET_HASH="$(printf '%s' "$TOKEN" | sha256sum | cut -d' ' -f1)"
+
+        # Build the artisan command list. Order matters:
+        # clear stale caches → migrate → (seed) → rebuild caches.
+        # NOTE: config:clear/route:clear/view:clear instead of optimize:clear,
+        # because optimize:clear also runs cache:clear, which needs the `cache`
+        # TABLE to already exist — it does not on a first deploy.
+        CMDS="$(jq -nc '["config:clear","route:clear","view:clear","migrate --force"]')"
+        if [ "${{ vars.RUN_SEEDER || 'false' }}" = "true" ]; then
+          CMDS="$(jq -c '. + ["db:seed --force"]' <<< "$CMDS")"
+        fi
+        CMDS="$(jq -c '. + ["cache:clear","storage:link","config:cache","event:cache","view:cache"]' <<< "$CMDS")"
+        if [ "${{ vars.ROUTE_CACHE || 'false' }}" = "true" ]; then
+          CMDS="$(jq -c '. + ["route:cache"]' <<< "$CMDS")"
+        fi
+        echo "Artisan plan: $CMDS"
+
+        # base64 so no quoting/sed-escaping can ever mangle the injected config.
+        CFG_B64="$(jq -nc --arg h "$SECRET_HASH" --argjson c "$CMDS" \
+                    '{secret_hash:$h, commands:$c}' | base64 -w0)"
+
+        mkdir -p public
+        {
+          echo '<?php'
+          echo '// Generated by GitHub Actions on every deploy — do not edit on the server.'
+          echo "\$CFG = json_decode(base64_decode('${CFG_B64}'), true);"
+        } > public/deploy-hook.php
+
+        cat >> public/deploy-hook.php << 'PHPEOF'
+
+        @ini_set('max_execution_time', '600');
+        @set_time_limit(600);
+        @ignore_user_abort(true);
+        @ini_set('memory_limit', '512M');
+
+        header('Content-Type: application/json');
+
+        $ROOT   = dirname(__DIR__);
+        $token  = isset($_GET['token'])  ? (string) $_GET['token']  : '';
+        $action = isset($_GET['action']) ? (string) $_GET['action'] : 'health';
+        $mode   = isset($_GET['mode'])   ? (string) $_GET['mode']   : 'auto';
+
+        if (empty($CFG['secret_hash']) || !hash_equals($CFG['secret_hash'], hash('sha256', $token))) {
+            http_response_code(403);
+            echo json_encode(array('error' => 'forbidden'));
+            exit;
+        }
+
+        function reply($payload, $code = 200)
+        {
+            http_response_code($code);
+            echo json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            exit;
+        }
+
+        function funcEnabled($name)
+        {
+            if (!function_exists($name)) {
+                return false;
+            }
+            $disabled = str_replace(' ', '', (string) ini_get('disable_functions'));
+            return !in_array($name, explode(',', $disabled), true);
+        }
+
+        // Zip archives carry no empty directories, and Laravel will not boot
+        // without these. Recreate the skeleton on every deploy.
+        function ensureSkeleton($root)
+        {
+            $dirs = array(
+                'storage', 'storage/app', 'storage/app/public', 'storage/app/private',
+                'storage/framework', 'storage/framework/cache', 'storage/framework/cache/data',
+                'storage/framework/sessions', 'storage/framework/testing', 'storage/framework/views',
+                'storage/logs', 'bootstrap/cache',
+            );
+            $created = array();
+            foreach ($dirs as $rel) {
+                $dir = $root . '/' . $rel;
+                if (!is_dir($dir)) {
+                    @mkdir($dir, 0775, true);
+                    $created[] = $rel;
+                }
+                @chmod($dir, 0775);
+            }
+            return $created;
+        }
+
+        // `php` on a shared host's PATH is very often an ancient 5.x stub — the
+        // classic reason exec('php artisan ...') fails while the site runs 8.x.
+        function findPhpBinary()
+        {
+            $v      = PHP_MAJOR_VERSION . PHP_MINOR_VERSION;
+            $dotted = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+            $candidates = array(
+                '/opt/cpanel/ea-php' . $v . '/root/usr/bin/php',
+                '/usr/local/bin/ea-php' . $v,
+                '/opt/alt/php' . $v . '/usr/bin/php',
+                '/opt/plesk/php/' . $dotted . '/bin/php',
+                '/usr/bin/php' . $dotted,
+                '/usr/local/bin/php' . $dotted,
+                '/usr/local/bin/php',
+                '/usr/bin/php',
+            );
+            foreach ($candidates as $bin) {
+                if (@is_executable($bin)) {
+                    return $bin;
+                }
+            }
+            return 'php';
+        }
+
+        function parseCommand($line)
+        {
+            $parts  = preg_split('/\s+/', trim($line));
+            $name   = array_shift($parts);
+            $params = array();
+            foreach ($parts as $p) {
+                if (strpos($p, '--') === 0) {
+                    $p = substr($p, 2);
+                    if (strpos($p, '=') !== false) {
+                        $kv = explode('=', $p, 2);
+                        $params['--' . $kv[0]] = $kv[1];
+                    } else {
+                        $params['--' . $p] = true;
+                    }
+                } else {
+                    $params[] = $p;
+                }
+            }
+            return array($name, $params);
+        }
+
+        // PREFERRED: drive the console kernel inside this request. Immune to
+        // exec() being disabled AND to the wrong CLI php — by definition it is
+        // the same PHP the site runs on. null => caller falls back to exec.
+        function runInProcess($root, $commands)
+        {
+            $autoload  = $root . '/vendor/autoload.php';
+            $bootstrap = $root . '/bootstrap/app.php';
+            if (!is_file($autoload) || !is_file($bootstrap)) {
+                return null;
+            }
+            if (!isset($_SERVER['argv'])) {
+                $_SERVER['argv'] = array('artisan');
+                $_SERVER['argc'] = 1;
+            }
+            try {
+                require_once $autoload;
+                $app    = require $bootstrap;
+                $kernel = $app->make('Illuminate\Contracts\Console\Kernel');
+            } catch (Throwable $e) {
+                return null;
+            }
+
+            $results = array();
+            foreach ($commands as $line) {
+                list($name, $params) = parseCommand($line);
+                $started = microtime(true);
+                try {
+                    $exit   = (int) $kernel->call($name, $params);
+                    $output = trim((string) $kernel->output());
+                } catch (Throwable $e) {
+                    $exit   = 1;
+                    $output = get_class($e) . ': ' . $e->getMessage();
+                }
+                $results[] = array(
+                    'cmd'    => $line,
+                    'exit'   => $exit,
+                    'ms'     => (int) round((microtime(true) - $started) * 1000),
+                    'output' => substr($output, 0, 4000),
+                );
+            }
+            return $results;
+        }
+
+        function runViaExec($root, $commands)
+        {
+            if (!funcEnabled('exec')) {
+                return array(array(
+                    'cmd' => '(exec)', 'exit' => 127, 'ms' => 0,
+                    'output' => 'exec() is disabled by disable_functions and Laravel could not be '
+                              . 'booted in-process. Run the artisan commands from cPanel Terminal / SSH.',
+                ));
+            }
+            $php     = findPhpBinary();
+            $results = array();
+            foreach ($commands as $line) {
+                $lines = array(); $exit = 0; $started = microtime(true);
+                @exec(escapeshellarg($php) . ' artisan ' . $line . ' 2>&1', $lines, $exit);
+                $results[] = array(
+                    'cmd'    => $php . ' artisan ' . $line,
+                    'exit'   => (int) $exit,
+                    'ms'     => (int) round((microtime(true) - $started) * 1000),
+                    'output' => substr(implode("\n", $lines), 0, 4000),
+                );
+            }
+            return $results;
+        }
+
+        // ── health: read-only. Run this first whenever a deploy misbehaves.
+        if ($action === 'health') {
+            $version = null;
+            if (is_file($ROOT . '/deploy-version.txt')) {
+                $version = trim(file_get_contents($ROOT . '/deploy-version.txt'));
+            }
+            reply(array(
+                'status'          => 'hook_alive',
+                'php_version'     => PHP_VERSION,
+                'php_sapi'        => PHP_SAPI,
+                'php_cli_guess'   => findPhpBinary(),
+                'project_root'    => $ROOT,
+                'deployed'        => $version,
+                'zip_extension'   => class_exists('ZipArchive'),
+                'exec_available'  => funcEnabled('exec'),
+                'symlink_allowed' => funcEnabled('symlink'),
+                'opcache'         => function_exists('opcache_reset'),
+                'free_space_mb'   => (int) round((float) @disk_free_space($ROOT) / 1048576),
+                'max_upload'      => ini_get('upload_max_filesize'),
+                'memory_limit'    => ini_get('memory_limit'),
+                'present'  => array(
+                    'vendor'     => is_dir($ROOT . '/vendor'),
+                    'env'        => is_file($ROOT . '/.env'),
+                    'artisan'    => is_file($ROOT . '/artisan'),
+                    'build'      => is_dir($ROOT . '/public/build'),
+                    'deploy_zip' => is_file($ROOT . '/deploy.zip'),
+                ),
+                'writable' => array(
+                    'root'            => is_writable($ROOT),
+                    'storage'         => is_writable($ROOT . '/storage'),
+                    'bootstrap_cache' => is_writable($ROOT . '/bootstrap/cache'),
+                    'public'          => is_writable($ROOT . '/public'),
+                ),
+            ));
+        }
+
+        // ── unzip
+        if ($action === 'unzip') {
+            if (!class_exists('ZipArchive')) {
+                reply(array('status' => 'zip_ext_missing',
+                    'msg' => 'PHP zip extension not enabled for the web SAPI. cPanel -> Select PHP Version -> Extensions -> zip.'), 500);
+            }
+            $zipPath = $ROOT . '/deploy.zip';
+            if (!is_file($zipPath)) {
+                reply(array('status' => 'no_zip',
+                    'msg' => 'deploy.zip not found in ' . $ROOT . ' — the FTP upload did not land here. Check FTP_SERVER_DIR.'), 404);
+            }
+            $bytes = filesize($zipPath);
+            $zip   = new ZipArchive();
+            $open  = $zip->open($zipPath);
+            if ($open !== true) {
+                reply(array('status' => 'unzip_failed', 'code' => $open,
+                    'msg' => 'ZipArchive::open() failed — usually a truncated upload. Re-run the workflow.'), 500);
+            }
+            $files = $zip->numFiles;
+            $ok    = $zip->extractTo($ROOT);
+            $zip->close();
+            if (!$ok) {
+                reply(array('status' => 'extract_failed',
+                    'msg' => 'Extraction failed — most often no free disk space or a read-only directory.'), 500);
+            }
+            @unlink($zipPath);
+            $created = ensureSkeleton($ROOT);
+            if (function_exists('opcache_reset')) { @opcache_reset(); }
+            clearstatcache(true);
+            reply(array('status' => 'unzipped_ok', 'files' => $files,
+                        'zip_bytes' => $bytes, 'created_dirs' => $created));
+        }
+
+        // ── artisan
+        if ($action === 'artisan') {
+            @chdir($ROOT);
+            $created  = ensureSkeleton($ROOT);
+            $commands = isset($CFG['commands']) ? $CFG['commands'] : array();
+
+            $used = 'in-process'; $results = null;
+            if ($mode !== 'exec') { $results = runInProcess($ROOT, $commands); }
+            if ($results === null) { $used = 'exec'; $results = runViaExec($ROOT, $commands); }
+
+            $link = $ROOT . '/public/storage';
+            if (!file_exists($link) && funcEnabled('symlink')) {
+                @symlink($ROOT . '/storage/app/public', $link);
+            }
+            if (function_exists('opcache_reset')) { @opcache_reset(); }
+
+            $failed = array();
+            foreach ($results as $r) { if ($r['exit'] !== 0) { $failed[] = $r['cmd']; } }
+
+            reply(array(
+                'status'       => count($failed) ? 'done_with_errors' : 'done',
+                'mode'         => $used,
+                'created_dirs' => $created,
+                'storage_link' => file_exists($link),
+                'failed_count' => count($failed),
+                'failed'       => $failed,
+                'results'      => $results,
+            ));
+        }
+
+        reply(array('error' => 'unknown action', 'known' => array('health', 'unzip', 'artisan')), 400);
+        PHPEOF
+
+        php -l public/deploy-hook.php
+
+    # ─────────────────────────────────────────────────────────────────────
+    # 7. PACKAGE
+    #    ftp_dist/ is exactly what lands on the server:
+    #      ftp_dist/deploy.zip            → the whole app, unpacked by the hook
+    #      ftp_dist/public/deploy-hook.php→ the unpacker itself (chicken & egg:
+    #                                       it must exist BEFORE the first unzip)
+    #      ftp_dist/.htaccess             → root → public/ rewrite (optional)
+    #
+    #    storage/ is deliberately NOT shipped: that is what protects uploaded
+    #    files and logs on the server. The hook recreates the empty skeleton.
+    #    bootstrap/cache/ is excluded too — runner-built caches must never
+    #    reach the server.
+    # ─────────────────────────────────────────────────────────────────────
+    - name: Package the release into one zip
+      run: |
+        set -euo pipefail
+        mkdir -p ftp_dist/public
+
+        zip -q -r ftp_dist/deploy.zip . \
+          -x "*.git*"                    \
+          -x "node_modules/*"            \
+          -x "storage"                   \
+          -x "storage/*"                 \
+          -x "bootstrap/cache/*"         \
+          -x "tests/*"                   \
+          -x "ftp_dist/*"                \
+          -x "composer.phar"             \
+          -x "*.log"
+
+        cp public/deploy-hook.php ftp_dist/public/deploy-hook.php
+
+        if [ "${{ vars.UPLOAD_ROOT_HTACCESS || 'true' }}" = "true" ] && [ -f .htaccess ]; then
+          cp .htaccess ftp_dist/.htaccess
+          echo "Root .htaccess will be uploaded."
+        else
+          echo "Skipping root .htaccess (document root already points at public/)."
+        fi
+
+        echo "── payload ──"
+        du -h ftp_dist/deploy.zip | cut -f1 | xargs -I{} echo "deploy.zip: {}"
+        unzip -l ftp_dist/deploy.zip | tail -1
+
+    # ─────────────────────────────────────────────────────────────────────
+    # 8. UPLOAD (a handful of files, not 25,000)
+    #    ⚠ Never enable dangerous-clean-slate: it wipes the server directory,
+    #      including uploaded user files.
+    # ─────────────────────────────────────────────────────────────────────
+    - name: Upload via FTP
+      uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+      with:
+        server:      ${{ secrets.FTP_HOST }}
+        username:    ${{ secrets.FTP_USERNAME }}
+        password:    ${{ secrets.FTP_PASSWORD }}
+        protocol:    ${{ vars.FTP_PROTOCOL || 'ftp' }}
+        port:        ${{ vars.FTP_PORT || '21' }}
+        local-dir:   ./ftp_dist/
+        server-dir:  ${{ vars.FTP_SERVER_DIR }}
+        timeout:     600000
+
+    # ─────────────────────────────────────────────────────────────────────
+    # 9. WORK OUT HOW TO REACH THE HOOK
+    #    Three routes are tried in order, because at least one of them always
+    #    works even when DNS/SSL/Cloudflare are in a half-configured state:
+    #      a) --resolve: force the IP but keep real SNI + certificate  (best)
+    #      b) plain HTTP to the IP with a Host: header                 (pre-DNS)
+    #      c) ordinary public DNS                                      (normal)
+    # ─────────────────────────────────────────────────────────────────────
+    - name: Prepare hook client
+      env:
+        FTP_HOST: ${{ secrets.FTP_HOST }}
+        APP_URL:  ${{ vars.APP_URL }}
+      run: |
+        set -euo pipefail
+        DOMAIN="$(printf '%s' "$APP_URL" | sed -e 's#^https\?://##' -e 's#/.*$##' | tr -d '[:space:]')"
+        HOSTONLY="$(printf '%s' "$FTP_HOST" | sed -e 's#^https\?://##' -e 's#/.*$##' | tr -d '[:space:]')"
+        if printf '%s' "$HOSTONLY" | grep -qE '^[0-9]+(\.[0-9]+){3}$'; then
+          SERVER_IP="$HOSTONLY"
+        else
+          SERVER_IP="$(getent ahostsv4 "$HOSTONLY" 2>/dev/null | awk '{print $1; exit}' || true)"
+        fi
+        echo "DOMAIN=$DOMAIN"       >> "$GITHUB_ENV"
+        echo "SERVER_IP=$SERVER_IP" >> "$GITHUB_ENV"
+        echo "Domain: $DOMAIN | direct IP: ${SERVER_IP:-'(none — DNS only)'}"
+
+        cat > "$RUNNER_TEMP/hook.sh" << 'HOOKEOF'
+        # hit <action> [timeout] → sets $RESPONSE / $HTTP_CODE, returns 0 on any reply
+        _curl() {
+          local url="$1"; shift
+          local raw
+          raw=$(curl -sS -G -k --max-time "$TMAX" \
+                  --data-urlencode "token=${DEPLOY_TOKEN}" \
+                  --data-urlencode "action=${ACTION}" \
+                  -w $'\n%{http_code}' "$@" "$url" 2>/dev/null) || return 1
+          HTTP_CODE=$(printf '%s' "$raw" | tail -n1)
+          RESPONSE=$(printf '%s' "$raw" | sed '$d')
+          [ -n "$RESPONSE" ] && [ "$HTTP_CODE" != "000" ]
+        }
+        hit() {
+          ACTION="$1"; TMAX="${2:-180}"; RESPONSE=""; HTTP_CODE=""
+          if [ -n "${SERVER_IP:-}" ]; then
+            _curl "https://${DOMAIN}/deploy-hook.php" --resolve "${DOMAIN}:443:${SERVER_IP}" && return 0
+            _curl "http://${SERVER_IP}/deploy-hook.php" -H "Host: ${DOMAIN}"                && return 0
+          fi
+          _curl "https://${DOMAIN}/deploy-hook.php" && return 0
+          _curl "http://${DOMAIN}/deploy-hook.php"  && return 0
+          return 1
+        }
+        explain_403() {
+          echo "::error::403 from the hook — the token did not match."
+          echo "  · DEPLOY_SECRET in GitHub differs from the one baked into this deploy, or"
+          echo "  · an OLD deploy-hook.php is still on the server (the FTP upload didn't overwrite it)."
+        }
+        HOOKEOF
+        echo "hook client ready"
+
+    # ─────────────────────────────────────────────────────────────────────
+    # 10. UNZIP ON THE SERVER
+    #     The hook may take a few seconds to become visible after FTP, so we
+    #     poll `health` first instead of a blind sleep.
+    # ─────────────────────────────────────────────────────────────────────
+    - name: Unzip release on server
+      env:
+        DEPLOY_SECRET: ${{ secrets.DEPLOY_SECRET }}
+      run: |
+        set -uo pipefail
+        source "$RUNNER_TEMP/hook.sh"
+        export DEPLOY_TOKEN="$(printf '%s' "$DEPLOY_SECRET" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+        echo "::group::Waiting for deploy-hook.php to answer"
+        ready=0
+        for i in 1 2 3 4 5 6; do
+          if hit health 30 && printf '%s' "$RESPONSE" | grep -q 'hook_alive'; then
+            echo "$RESPONSE"; ready=1; break
+          fi
+          if [ "${HTTP_CODE:-}" = "403" ]; then explain_403; exit 1; fi
+          echo "attempt $i — not reachable yet (HTTP ${HTTP_CODE:-none}); retrying…"
+          sleep $(( i * 5 ))
+        done
+        echo "::endgroup::"
+
+        if [ "$ready" != "1" ]; then
+          echo "::error::deploy-hook.php never answered at https://${DOMAIN}/deploy-hook.php"
+          echo "Most likely: FTP_SERVER_DIR points somewhere other than the site root,"
+          echo "or the root .htaccess (root → public/ rewrite) is missing. See TROUBLESHOOTING.md."
+          exit 1
+        fi
+
+        echo "::group::Unzipping"
+        if hit unzip 300 && printf '%s' "$RESPONSE" | grep -q 'unzipped_ok'; then
+          echo "$RESPONSE"
+        else
+          echo "$RESPONSE"
+          echo "::error::Unzip failed on the server (HTTP ${HTTP_CODE:-none})."
+          exit 1
+        fi
+        echo "::endgroup::"
+
+    # ─────────────────────────────────────────────────────────────────────
+    # 11. MIGRATE + REBUILD CACHES
+    # ─────────────────────────────────────────────────────────────────────
+    - name: Run artisan (migrate, caches, storage link)
+      env:
+        DEPLOY_SECRET: ${{ secrets.DEPLOY_SECRET }}
+      run: |
+        set -uo pipefail
+        source "$RUNNER_TEMP/hook.sh"
+        export DEPLOY_TOKEN="$(printf '%s' "$DEPLOY_SECRET" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+        hit artisan 600
+        echo "::group::Artisan report"
+        printf '%s\n' "$RESPONSE"
+        echo "::endgroup::"
+
+        if ! printf '%s' "$RESPONSE" | grep -q '"status"'; then
+          echo "::error::No JSON returned from the artisan hook (HTTP ${HTTP_CODE:-none})."
+          exit 1
+        fi
+
+        FAILED="$(printf '%s' "$RESPONSE" | jq -r '.failed_count // 1' 2>/dev/null || true)"
+        FAILED="${FAILED:-1}"
+        if [ "$FAILED" != "0" ]; then
+          printf '%s' "$RESPONSE" | jq -r '.results[] | select(.exit != 0) | "✗ " + .cmd + "\n" + .output'
+          if [ "${{ vars.DEPLOY_STRICT || 'true' }}" = "true" ]; then
+            echo "::error::$FAILED artisan command(s) failed — see the report above."
+            exit 1
+          else
+            echo "::warning::$FAILED artisan command(s) failed (DEPLOY_STRICT=false, continuing)."
+          fi
+        fi
+
+    # ─────────────────────────────────────────────────────────────────────
+    # 12. PROVE THE SITE IS ACTUALLY UP
+    #     Without this a deploy can "succeed" while the homepage 500s.
+    # ─────────────────────────────────────────────────────────────────────
+    - name: Verify the site responds
+      run: |
+        set -uo pipefail
+        for i in 1 2 3; do
+          CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 60 -L "${{ vars.APP_URL }}" || echo 000)
+          echo "attempt $i → HTTP $CODE"
+          # "000" means curl never got a response — it must NOT count as "< 400".
+          if [ "$CODE" != "000" ] && [ "$CODE" -lt 400 ] 2>/dev/null; then
+            echo "✅ ${{ vars.APP_URL }} is up"; exit 0
+          fi
+          sleep 5
+        done
+        echo "::error::${{ vars.APP_URL }} returned HTTP $CODE after deploy."
+        echo "Check storage/logs/laravel.log on the server, or set APP_DEBUG=true (variable) and redeploy."
+        exit 1
+
+    - name: Summary
+      if: always()
+      run: |
+        {
+          echo "### Deploy — ${{ github.ref_name }} @ \`${{ github.sha }}\`"
+          echo ""
+          echo "| | |"
+          echo "|---|---|"
+          echo "| Target | ${{ vars.APP_URL }} |"
+          echo "| Server dir | \`${{ vars.FTP_SERVER_DIR }}\` |"
+          echo "| Seeder | ${{ vars.RUN_SEEDER || 'false' }} |"
+          echo "| route:cache | ${{ vars.ROUTE_CACHE || 'false' }} |"
+          echo ""
+          echo "Health check: \`https://<domain>/deploy-hook.php?token=<DEPLOY_SECRET>&action=health\`"
+        } >> "$GITHUB_STEP_SUMMARY"

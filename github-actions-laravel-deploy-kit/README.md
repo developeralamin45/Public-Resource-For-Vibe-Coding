@@ -6,6 +6,12 @@ a fresh database backup, with every cache busted. No SSH by hand, no
 
 **GitHub Actions · Laravel 10/11/12 · Vite · any Linux VPS · MIT.**
 
+> **No SSH on your host?** This kit needs it. For cPanel / shared hosting where
+> port 22 is firewalled and FTP is the only way in, use
+> [`../cpanel-ftp-laravel-deploy-kit/`](../cpanel-ftp-laravel-deploy-kit/) —
+> same build-on-the-runner idea, delivered as one zip and unpacked by a
+> token-protected PHP hook.
+
 ---
 
 ## Why this exists

@@ -1,0 +1,52 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  public/.htaccess — Laravel's stock front-controller rules, plus the two
+#  production headers worth adding. This is normally already in your repo at
+#  public/.htaccess; included here so a hand-repair is one copy away.
+#
+#  ⚠ Do NOT turn on PHP's zlib.output_compression to get gzip. Do compression
+#    at the web-server level (mod_deflate / brotli) only — see below.
+# ═══════════════════════════════════════════════════════════════════════════
+
+<IfModule mod_rewrite.c>
+    <IfModule mod_negotiation.c>
+        Options -MultiViews -Indexes
+    </IfModule>
+
+    RewriteEngine On
+
+    # Handle Authorization Header
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # Handle X-XSRF-Token Header
+    RewriteCond %{HTTP:x-xsrf-token} .
+    RewriteRule .* - [E=HTTP_X_XSRF_TOKEN:%{HTTP:X-XSRF-Token}]
+
+    # Redirect trailing slashes if not a folder
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_URI} (.+)/$
+    RewriteRule ^ %1 [L,R=301]
+
+    # Send requests to the front controller
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^ index.php [L]
+</IfModule>
+
+# ── Vite build assets are content-hashed → cache them forever ─────────────
+<IfModule mod_headers.c>
+    <FilesMatch "\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|webp|avif)$">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </FilesMatch>
+</IfModule>
+
+# ── Compression: web-server level ONLY ────────────────────────────────────
+# NEVER set php_value zlib.output_compression On here. Laravel's storage/{path}
+# route (and any BinaryFileResponse) sends Content-Length for the UNCOMPRESSED
+# body; if PHP then gzips it, the header no longer matches and browsers throw
+# net::ERR_INVALID_HTTP_RESPONSE — every uploaded image on the site breaks.
+# curl will NOT reveal this (it does not request gzip by default); reproduce
+# with:  curl -H "Accept-Encoding: gzip" -I https://site/storage/foo.webp
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/css text/javascript application/javascript application/json application/xml
+</IfModule>
