@@ -1,0 +1,176 @@
+name: Deploy to production
+
+# =============================================================================
+#  Laravel + Vite → VPS, over SSH. Push to master → tested, built, live.
+#
+#  Pipeline:  test  →  build (composer --no-dev + npm run build)
+#                   →  rsync the release
+#                   →  post-deploy on the server (backup → migrate → caches)
+#                   →  purge the CDN (optional)
+#
+#  REQUIRED repository secrets — see SECRETS.md for how to obtain each one:
+#     SERVER_IP  SERVER_USERNAME  SERVER_SSH_KEY  PROJECT_PATH
+#     DB_DATABASE  DB_USERNAME  DB_PASSWORD
+#  OPTIONAL: CLOUDFLARE_ZONE_ID  CLOUDFLARE_API_TOKEN
+#
+#  TUNE FOR YOUR PROJECT (the only lines you normally touch):
+#     - php-version / extensions   → match your composer.json "php" constraint
+#     - node-version               → match your package.json engines
+#     - branches: [master, main]   → your production branch
+#     - the rsync --exclude list   → anything the server owns, not the repo
+# =============================================================================
+
+# workflow_dispatch lets you re-run a deploy manually from the Actions tab.
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+# Never let two deploys run on the server at the same time.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, dom, fileinfo, curl, pdo_mysql, pdo_sqlite, sqlite3, gd, zip, bcmath, intl
+          coverage: none
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare test environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Run test suite
+        run: php artisan test
+
+  deploy:
+    name: Deploy
+    needs: test
+    runs-on: ubuntu-latest
+    # Mapped here because `secrets` is not readable from a step-level `if:`.
+    env:
+      CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+      CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, dom, fileinfo, curl, pdo_mysql, gd, zip, bcmath, intl
+          coverage: none
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-prod-${{ hashFiles('composer.lock') }}
+
+      - name: Install PHP dependencies (production)
+        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-progress
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Build frontend assets
+        run: npm run build
+
+      # ---- everything above builds the release; everything below ships it ----
+
+      - name: Load SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SERVER_SSH_KEY }}
+
+      # Every step below opens an SSH connection, and the server refuses about
+      # a quarter of them outright (see .github/scripts/with-retry.sh). Each
+      # one is therefore retried rather than allowed to fail the deploy.
+      - name: Trust remote host
+        run: |
+          mkdir -p ~/.ssh
+          .github/scripts/with-retry.sh bash -c '
+            keys=$(ssh-keyscan -H "$1" 2>/dev/null) || exit 1
+            [ -n "$keys" ] || exit 1
+            printf "%s\n" "$keys" >> ~/.ssh/known_hosts
+          ' _ "${{ secrets.SERVER_IP }}"
+
+      - name: Rsync release to server
+        run: |
+          .github/scripts/with-retry.sh rsync -az --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='node_modules/' \
+            --exclude='tests/' \
+            --exclude='.env' \
+            --exclude='storage/app/' \
+            --exclude='storage/framework/' \
+            --exclude='storage/logs/' \
+            --exclude='public/storage' \
+            --exclude='public/hot' \
+            --exclude='bootstrap/cache/*.php' \
+            ./ "${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP }}:${{ secrets.PROJECT_PATH }}/"
+
+      # This was appleboy/ssh-action, which has no retry of its own — and it is
+      # the step that failed most often, always AFTER rsync had shipped the
+      # files, leaving the server serving new code behind stale caches. A plain
+      # ssh call can go through with-retry.sh, and drops a third-party action
+      # from the release path. The script arrives on stdin rather than as
+      # arguments, so DB_PASSWORD never shows up in the server's process list.
+      - name: Post-deploy on server (backup → safe migrate → cache)
+        env:
+          SERVER: ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP }}
+          PROJECT_PATH: ${{ secrets.PROJECT_PATH }}
+          DB_DATABASE: ${{ secrets.DB_DATABASE }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          payload="$RUNNER_TEMP/post-deploy-payload.sh"
+          {
+            printf 'export PROJECT_PATH=%q\n' "$PROJECT_PATH"
+            printf 'export DB_DATABASE=%q\n'  "$DB_DATABASE"
+            printf 'export DB_USERNAME=%q\n'  "$DB_USERNAME"
+            printf 'export DB_PASSWORD=%q\n'  "$DB_PASSWORD"
+            cat .github/scripts/post-deploy.sh
+          } > "$payload"
+
+          RETRY_STDIN="$payload" .github/scripts/with-retry.sh \
+            ssh -o BatchMode=yes -o ConnectTimeout=20 "$SERVER" 'bash -s'
+
+      # Only runs when the two Cloudflare secrets exist; otherwise skipped
+      # silently, so this workflow stays correct with or without a CDN.
+      - name: Purge Cloudflare cache
+        if: env.CF_ZONE_ID != '' && env.CF_API_TOKEN != ''
+        run: |
+          curl -sS -X POST \
+            "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/purge_cache" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data '{"purge_everything":true}'
+          echo
+          echo "Cloudflare cache purged"
