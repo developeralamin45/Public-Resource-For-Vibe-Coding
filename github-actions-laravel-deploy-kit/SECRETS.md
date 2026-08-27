@@ -125,9 +125,57 @@ Both must exist, or the purge step is skipped.
 
 ## 5. One-time server preparation
 
-Two things the secrets cannot do for you.
+Things the secrets cannot do for you. **(a) and (b) are required.**
 
-### a) Let the deploy user reload PHP-FPM
+### a) Preflight — four checks, five seconds
+
+Paste this on the server. Every line must answer.
+
+```bash
+whoami; pwd                            # → SERVER_USERNAME and PROJECT_PATH
+command -v rsync      || echo "MISSING → sudo apt install rsync"
+command -v mysqldump  || echo "MISSING → sudo apt install mysql-client"
+php -v | head -1                       # the CLI PHP that will run `artisan`
+```
+
+- **`rsync` must exist on the server**, not just on GitHub's runner. Missing, the
+  deploy dies mid-transfer with an error that reads like a network fault.
+- **`mysqldump` missing does not stop the deploy** — it prints a warning and
+  migrates anyway. Green deploy, no backup. Install it.
+- **PHP CLI is often a different build from PHP-FPM.** `artisan` runs on the
+  CLI one. If it is older than your app needs, `migrate` fails *after* the new
+  files have already shipped.
+
+### b) Point the web root at `public/`
+
+Your web server must serve **`PROJECT_PATH/public`**, never `PROJECT_PATH`.
+
+```bash
+grep -rn "root " /etc/nginx/sites-enabled/ | head    # must end in /public
+```
+
+Point it one level too high and your entire application source — **`.env`
+included, with the database password in it** — is downloadable over HTTP. Check
+this before the site is public. On CloudPanel / Plesk this is the site's
+"document root" field and is usually already correct; on a hand-rolled nginx
+vhost it is the single most common mistake.
+
+### c) Upload limits, if the app accepts files
+
+Laravel's own validation cannot raise these — PHP rejects the request before
+your code ever runs, and the user sees an empty page rather than an error.
+
+```ini
+# php.ini (or the FPM pool)
+upload_max_filesize = 12M
+post_max_size = 64M      # must cover a whole multi-file batch, not one file
+```
+```nginx
+# nginx / CloudPanel vhost
+client_max_body_size 64M;
+```
+
+### d) Let the deploy user reload PHP-FPM
 
 Without this, OPcache can keep serving yesterday's compiled PHP for a few
 seconds after a deploy. Find the real unit name first — it is **not** always
@@ -150,7 +198,7 @@ Get the username or the unit name wrong and sudo declines **silently**: the
 deploy still goes green, and OPcache serves stale bytecode until PHP notices on
 its own. The deploy log tells you — look for `could not reload … (no sudo?)`.
 
-### b) Raise the SSH pre-auth queue
+### e) Raise the SSH pre-auth queue
 
 Only if deploys fail with `kex_exchange_identification: Connection reset by
 peer`. That is not a network fault — see
@@ -169,6 +217,9 @@ if it ever is.
 ## 6. Checklist — before your first push
 
 - [ ] `ssh -i ~/.ssh/deploy_key USER@IP "echo ok"` logs in with **no password**
+- [ ] Preflight (§5a) passed: `rsync` **and** `mysqldump` both present, CLI PHP
+      new enough for the app
+- [ ] The web root ends in `/public` (§5b) — check before the site is public
 - [ ] All **seven** secrets exist, spelled exactly as in §3
 - [ ] `PROJECT_PATH` has **no trailing slash** and `cd`s successfully on the server
 - [ ] `.env.example` is **committed** — the first deploy builds the server's

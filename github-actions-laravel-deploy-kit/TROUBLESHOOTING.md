@@ -97,6 +97,18 @@ The `Trust remote host` step failed or was removed. It must run before rsync.
 
 ## The `deploy` job fails on the server
 
+**`rsync: command not found`** / **`rsync error: remote command not found (code 127)`**
+`rsync` must be installed on **both** ends. The runner has it; your server may
+not. `sudo apt install rsync` (or `dnf install rsync`). The error arrives mid-
+transfer and reads like a network fault — it is not.
+
+**`PHP Parse error` / `requires php >= 8.x` during `migrate`, but the site works**
+`artisan` runs on the **CLI** PHP binary; your site runs on **FPM**. They are
+frequently different builds. `php -v` on the server tells you the CLI version;
+`systemctl list-units | grep fpm` tells you the FPM one. Point the CLI at the
+right binary (`update-alternatives --config php`, or use the full path such as
+`/usr/bin/php8.2`) — and note this fails *after* rsync has already shipped.
+
 **`cd: /path/to/app: No such file or directory`**
 `PROJECT_PATH` is wrong or has a trailing slash. SSH in, `cd` there, `pwd`,
 paste exactly that.
@@ -121,7 +133,7 @@ usually after a hand-run migration or a restored database.
 
 **`could not reload php-fpm.service (no sudo?)`**
 Not fatal — PHP picks the change up within seconds via `validate_timestamps`.
-To make it instant, see [SECRETS.md §5a](./SECRETS.md). Remember the unit name
+To make it instant, see [SECRETS.md §5d](./SECRETS.md). Remember the unit name
 is discovered at runtime and is often `php-fpm.service`, not `php8.2-fpm`.
 
 ---
@@ -155,6 +167,17 @@ symlink path is occupied by a real directory — remove that directory first).
 `storage/app/` was not excluded from rsync. Restore from backup, add the
 exclude, and re-check §6 of the RECIPE for every other writable path your app
 owns.
+
+**The browser shows a directory listing, or offers `.env` as a download**
+🚨 **Stop and fix this now — your database password is public.** The web root
+points at `PROJECT_PATH` instead of `PROJECT_PATH/public`. Correct the vhost,
+reload nginx, then **rotate the database password and `APP_KEY`**, because you
+must assume both were read.
+
+**Queued jobs still run the old code**
+`queue:restart` only signals workers to exit after their current job; something
+must restart them. Check `sudo supervisorctl status`. No worker at all, and
+queued jobs simply never run — see [RECIPE.md §4b](./RECIPE.md).
 
 **Everyone got logged out**
 File-based sessions plus `rsync --delete`. Move to

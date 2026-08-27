@@ -63,7 +63,9 @@ idempotent, which is what makes retrying them safe.
 
 ```
 RECIPE.md               ← the implementation guide (humans + AI). Start here.
+                          §0 discovery · §0b server preflight · §4b queue workers
 SECRETS.md              ← every GitHub secret, and exactly where to get its value
+                          + SSH key, web root, upload limits, FPM sudo, sshd
 TROUBLESHOOTING.md      ← real error messages → the fix that worked
 LICENSE                 ← MIT
 

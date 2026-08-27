@@ -9,6 +9,61 @@
 
 ---
 
+## 0. Before you touch anything — discovery
+
+You are being dropped into somebody else's project. Learn it first; three of
+the values below are wrong-by-default and nothing catches them later.
+
+```bash
+# --- the repo ---
+git branch --show-current                  # → deploy.yml `branches:` must match
+ls .github/workflows/                      # ALREADY has a deploy workflow? see below
+grep '"php"' composer.json                 # → php-version in BOTH jobs
+node -v && grep -A2 '"engines"' package.json  # → node-version
+grep -n '"build"' package.json             # → is the build script really `npm run build`?
+ls .env.example composer.lock package-lock.json   # all three MUST exist
+grep -n 'DB_CONNECTION\|DB_DATABASE' phpunit.xml  # tests must run without MySQL
+ls bootstrap/app.php app/Http/Kernel.php 2>/dev/null  # Laravel 11+ vs 10-
+```
+
+Then find **every writable path the app owns** — each one needs an rsync
+exclude (§6), and missing one is a restore-from-backup:
+
+```bash
+grep -rn "storage_path(\|public_path(\|->put(\|Storage::disk" app/ config/ \
+  | grep -v vendor | sort -u
+```
+
+**If a deploy workflow already exists, do not overwrite it.** Read it, tell the
+human what it does differently, and let them choose. Silently replacing a
+working pipeline is how a project loses a step nobody remembered was there.
+
+**Never invent secret values.** If you cannot determine `SERVER_IP` or
+`PROJECT_PATH`, ask. A placeholder that looks plausible produces a deploy that
+fails in a way nobody can read.
+
+## 0b. Server preflight — run this before the first deploy
+
+Four things must be true on the server. Have the human paste this over SSH and
+send you the output; it takes five seconds and prevents the three most
+confusing first-deploy failures.
+
+```bash
+echo "--- user + path ---";  whoami; pwd
+echo "--- rsync ---";        command -v rsync   || echo "MISSING: sudo apt install rsync"
+echo "--- mysqldump ---";    command -v mysqldump || echo "MISSING: sudo apt install mysql-client"
+echo "--- php CLI ---";      php -v | head -1
+echo "--- php FPM ---";      systemctl list-units --type=service | grep -i fpm
+echo "--- web root ---";     grep -rn "root " /etc/nginx/sites-enabled/ 2>/dev/null | head
+```
+
+| What you are checking | Why it matters |
+|---|---|
+| **`rsync` exists** | It must be installed on **both** ends. Missing on the server, the deploy dies mid-transfer with `command not found` from a remote shell — an error that reads like a network fault. |
+| **`mysqldump` exists** | Without it the backup step prints a warning and **migrates anyway**. Green deploy, no safety net. |
+| **PHP CLI version** | `artisan` runs on the **CLI** binary, your site runs on **FPM**. They are frequently different builds. If CLI is older than your `composer.json` requires, `migrate` fails after the files have already shipped. |
+| **Web root ends in `/public`** | nginx must serve `PROJECT_PATH/public`, never `PROJECT_PATH`. Point it one level up and the whole application source — `.env` included — is downloadable over HTTP. Check this before the site is public. |
+
 ## 1. What you are building
 
 ```
@@ -103,10 +158,63 @@ git update-index --chmod=+x .github/scripts/post-deploy.sh .github/scripts/with-
    If the suite genuinely needs MySQL, add a `services: mysql:8` block to the
    test job rather than deleting the job. **Never delete the test job** — it is
    the only thing standing between a broken commit and production.
-6. **Tell the human to do [`SECRETS.md`](./SECRETS.md).** You cannot do this
-   part. Give them the seven names and stop; do not invent placeholder values,
-   and never write a real secret into a file.
-7. **Push.** Watch the Actions tab.
+6. **Decide the queue.** `post-deploy.sh` runs `queue:restart`, which is a
+   harmless no-op if nothing is listening. But if the app dispatches jobs
+   (`ShouldQueue`, `Mail::queue`, `dispatch()`), `QUEUE_CONNECTION` must not be
+   `sync` in production, and a worker has to be running — see §4b.
+7. **Hand the human [`SECRETS.md`](./SECRETS.md).** You cannot do this part:
+   you cannot read their server password or click through GitHub's settings.
+   Paste them the block below, then stop and wait. Do not invent placeholder
+   values, and never write a real secret into a file.
+8. **Push.** Watch the Actions tab, then work §11.
+
+### The message to hand the human
+
+> I have added the deploy pipeline. Before it can run, please create these
+> **seven repository secrets** — GitHub → your repo → *Settings → Secrets and
+> variables → Actions → New repository secret*:
+>
+> `SERVER_IP` · `SERVER_USERNAME` · `SERVER_SSH_KEY` · `PROJECT_PATH` ·
+> `DB_DATABASE` · `DB_USERNAME` · `DB_PASSWORD`
+>
+> **SECRETS.md** has each one with exactly where to find its value, plus how to
+> generate the SSH key (2 minutes). Two things it is easy to get wrong:
+> `SERVER_SSH_KEY` is the **private** key including the blank line at the end,
+> and `PROJECT_PATH` takes **no trailing slash**.
+>
+> Optional: `CLOUDFLARE_ZONE_ID` + `CLOUDFLARE_API_TOKEN` if the site is behind
+> Cloudflare. Without them the purge step is skipped silently.
+>
+> Also run the preflight in RECIPE.md §0b on the server and send me the output.
+
+## 4b. Queue workers (only if the app queues jobs)
+
+`queue:restart` does not *start* a worker — it signals running workers to exit
+after their current job so `supervisor` restarts them on the new code. Without
+that signal a worker keeps running the old code for as long as it lives, which
+looks exactly like "my deploy did not work".
+
+```ini
+# /etc/supervisor/conf.d/laravel-queue.conf
+[program:laravel-queue]
+command=php /path/to/app/artisan queue:work --sleep=3 --tries=3 --max-time=3600
+directory=/path/to/app
+user=deploy
+autostart=true
+autorestart=true
+numprocs=2
+redirect_stderr=true
+stdout_logfile=/path/to/app/storage/logs/queue-worker.log
+stopwaitsecs=3600
+```
+
+```bash
+sudo supervisorctl reread && sudo supervisorctl update && sudo supervisorctl status
+```
+
+`stopwaitsecs` must exceed your longest job, or supervisor kills a job mid-way.
+If the app queues nothing, skip all of this — `QUEUE_CONNECTION=sync` is a
+legitimate production setting for a site with no background work.
 
 ## 5. The seams — what changes per project
 
