@@ -1,8 +1,9 @@
-# 📧 Transactional Email Kit
+# 📧 SMTP Setup Kit
 
-A complete, **admin-controlled** email system you can drop into any project.
-Not just "how do I send mail" — the whole thing around it: which emails exist,
-what they say, whether they go out at all, and when.
+Everything you need to make an app send email, and keep sending it: SMTP setup
+**plus the Gmail API path that keeps working when your host blocks SMTP ports**,
+and the whole system around it — which emails exist, what they say, whether
+they go out at all, and when.
 
 **Laravel backend · React + TypeScript admin UI · MIT · free for anyone.**
 
@@ -48,7 +49,7 @@ No Mailable class. No Blade file. No deploy when the wording changes.
 Copy this into your agent — the link plus one sentence is all it needs:
 
 ```
-Read https://github.com/developeralamin45/Public-Resource-For-Vibe-Coding/tree/main/transactional-email-kit
+Read https://github.com/developeralamin45/Public-Resource-For-Vibe-Coding/tree/main/smtp-setup-kit
 and implement it in this project. Follow its RECIPE.md: inspect my codebase
 first, adapt it to what this project actually is, then tell me what I need to
 do myself.
