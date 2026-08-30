@@ -1,0 +1,565 @@
+<!-- ====================================================================
+     bKash · Nagad · Rocket · Bank — Send-Money Popup (vanilla master copy)
+
+     This is the production-faithful reference: paste this file's contents
+     into the page (or template partial) that hosts your checkout, load
+     bd-phone.js and keyboard-aware.js alongside it, and fill DP_CONFIG.
+
+     The page that includes it drives it through these globals:
+       window.dpOpen(provider, amount)  — open for bkash/nagad/rocket/bank
+       window.dpClose()                 — close it (e.g. after your submit
+                                          succeeds, if you don't redirect)
+       window.dpToast(message)          — the same pill toast the popup uses
+       window.dpOnSubmit(provider, ref) — YOUR callback: the reference passed
+                                          validation, do the submit
+       window.dpOnSwitch(provider)      — optional: user switched wallet tabs
+                                          (sync your page's method picker)
+
+     Everything below DP_CONFIG is the machinery — port it verbatim.
+==================================================================== -->
+
+<!-- 1 · CONFIG — the only block you edit. Fill from your backend/config,
+     never hardcode a customer-facing merchant number in two places. -->
+<script>
+    window.DP_CONFIG = {
+        appName: 'YourBrand',                       /* shown under the popup title */
+
+        /* Your merchant (receiver) wallet numbers. Omit a key to hide that
+           wallet everywhere — tabs, dpOpen, the lot. */
+        numbers: {
+            bkash:  '01XXXXXXXXX',
+            nagad:  '01XXXXXXXXX',
+            rocket: '01XXXXXXXXX'
+        },
+
+        /* Bank transfer receiver, or null to disable the bank flow.
+           branch and routing_number may be '' — their rows are skipped. */
+        bank: {
+            bank_name:      'Example Bank PLC',
+            account_name:   'Your Company Ltd.',
+            account_number: '1234567890123',
+            branch:         'Gulshan',
+            routing_number: '123456789'
+        },
+
+        /* Last-used sender number per wallet, e.g. { bkash: '017…' } —
+           prefills the reference field for returning customers. */
+        senderPrefill: {},
+
+        /* Namespaces the reopen-after-refresh storage; give each distinct
+           checkout page its own key (e.g. the order/course id). */
+        popupKey: 'default',
+
+        /* Folder holding bkash.webp / nagad.webp / rocket.webp. */
+        assetsBase: 'assets'
+    };
+</script>
+
+<style>
+    /* overscroll-behavior: reaching the overlay's end must not hand the swipe
+       to the page behind it — on iOS that rubber-bands the checkout under a
+       popup that stays put. */
+    .dp-overlay{position:fixed;inset:0;z-index:200;overflow-y:auto;overscroll-behavior:contain;background:rgba(10,12,24,.72);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
+    .dp-center{display:flex;min-height:100%;padding:16px;padding-bottom:max(24px,env(safe-area-inset-bottom,0px));}
+    /* The overlay is fixed and scrolls itself, so the page-level room reserved
+       by keyboard-aware.js cannot reach in here — it hands over the
+       measurement in --kb-reserve and this is where the popup spends it. Two
+       jobs, one line: a card shorter than the overlay re-centres upward out of
+       the keyboard's way (margin:auto redistributes), and a taller one gains
+       exactly the scroll range it needs to lift the number field clear. */
+    html[data-kb] .dp-center{padding-bottom:calc(max(24px,env(safe-area-inset-bottom,0px)) + var(--kb-reserve, 0px));}
+    .dp-card{margin:auto;background:#fff;border-radius:28px;width:100%;max-width:440px;box-shadow:0 16px 40px rgba(0,0,0,.12);animation:dpSlideUp .4s cubic-bezier(.34,1.45,.64,1) forwards;position:relative;font-family:'Anek Bangla','Hind Siliguri',sans-serif;}
+    @keyframes dpSlideUp{from{opacity:0;transform:translateY(40px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+    .dp-strip{background:linear-gradient(135deg,var(--brand) 0%,var(--brand-dark) 100%);border-radius:28px 28px 0 0;padding:12px 14px;display:flex;align-items:center;gap:12px;position:relative;}
+    .dp-strip-logo{width:38px;height:38px;border-radius:12px;background:#fff;box-shadow:0 4px 12px rgba(0,0,0,.15);padding:6px;object-fit:contain;flex-shrink:0;}
+    .dp-strip-name{font-size:15.5px;font-weight:800;color:#fff;line-height:1.2;white-space:nowrap;margin:0;}
+    .dp-strip-sub{font-size:12px;color:rgba(255,255,255,.85);margin:2px 0 0;}
+    .dp-close{position:absolute;top:10px;right:10px;width:28px;height:28px;border-radius:50%;border:none;background:rgba(255,255,255,.18);color:#fff;font-size:16px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+    .dp-close:hover{background:rgba(255,255,255,.3);}
+    .dp-body{padding:12px 14px 14px;}
+    .dp-copy-all{width:100%;display:flex;align-items:center;justify-content:center;gap:6px;padding:9px;background:var(--brand-light);border:none;border-top:1px solid #e2e8f0;color:var(--brand-dark);font-size:13px;font-weight:800;cursor:pointer;font-family:inherit;transition:all .2s;}
+    .dp-copy-all:hover{background:var(--brand);color:#fff;}
+    .dp-copy-all.copied{background:#10b981;color:#fff;}
+    .dp-copy-all svg{width:14px;height:14px;flex-shrink:0;}
+    .dp-tabs{display:flex;gap:8px;margin-bottom:10px;}
+    .dp-tab{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:8px 4px;background:#fff;border:1.5px solid #cbd5e1;border-radius:12px;font-size:14px;font-weight:700;color:#475569;cursor:pointer;font-family:inherit;transition:all .2s;}
+    .dp-tab img{width:20px;height:20px;object-fit:contain;flex-shrink:0;}
+    .dp-tab.active{border-color:var(--brand);border-width:2px;color:var(--brand-dark);background:var(--brand-light);}
+    .dp-tab:not(.active):hover{border-color:#94a3b8;}
+    .dp-amount{background:var(--brand-light);border:1px solid rgba(0,0,0,.05);border-radius:14px;padding:8px 14px;display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+    .dp-amount-left{display:flex;align-items:center;gap:10px;}
+    .dp-amount-icon{width:30px;height:30px;border-radius:10px;background:rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+    .dp-amount-icon svg{width:18px;height:18px;stroke:var(--brand-dark);}
+    .dp-amount-label-txt{font-size:14px;color:#475569;font-weight:700;}
+    .dp-amount-val{font-size:22px;font-weight:800;color:var(--brand-dark);letter-spacing:-.5px;}
+    .dp-num-lbl{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#334155;margin:0 0 6px;}
+    .dp-num-lbl svg{width:16px;height:16px;stroke:var(--brand);}
+    .dp-num-box{display:flex;align-items:center;justify-content:space-between;background:#f8fafc;border:1.5px solid #cbd5e1;border-radius:14px;padding:9px 12px;margin-bottom:10px;}
+    .dp-num{font-size:19px;font-weight:800;color:#1e293b;letter-spacing:1px;}
+    .dp-bank{background:#f8fafc;border:1.5px solid #cbd5e1;border-radius:14px;margin-bottom:10px;overflow:hidden;}
+    .dp-bank-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 12px;}
+    .dp-bank-row + .dp-bank-row{border-top:1px solid #e2e8f0;}
+    .dp-bank-lbl{font-size:11px;color:#64748b;font-weight:600;flex-shrink:0;}
+    .dp-bank-val{font-size:13px;font-weight:800;color:#1e293b;text-align:right;word-break:break-all;min-width:0;}
+    .dp-bank-val.mono{font-size:14px;letter-spacing:.5px;}
+    .dp-copy.sm{padding:6px 10px;font-size:12px;border-radius:8px;}
+    .dp-copy{display:flex;align-items:center;gap:6px;background:var(--brand);border:none;border-radius:10px;padding:8px 14px;cursor:pointer;color:#fff;font-size:13px;font-weight:700;transition:all .2s;white-space:nowrap;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.15);}
+    .dp-copy:hover{background:var(--brand-dark);}
+    .dp-copy.copied{background:#10b981;box-shadow:0 2px 8px rgba(16,185,129,.3);}
+    .dp-copy svg{width:14px;height:14px;}
+    .dp-steps-ttl{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#334155;margin:0 0 6px;}
+    .dp-steps-ttl svg{width:16px;height:16px;stroke:var(--brand);}
+    .dp-steps{background:#f8fafc;border:1px solid #e2e8f0;border-left:3px solid var(--brand);border-radius:12px;padding:8px 12px;margin-bottom:10px;display:flex;flex-direction:column;gap:5px;}
+    .dp-step{display:flex;align-items:flex-start;gap:10px;font-size:12.5px;color:#334155;font-weight:600;line-height:1.4;}
+    .dp-step-n{background:var(--brand);color:#fff;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:800;flex-shrink:0;}
+    .dp-inp-lbl{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#334155;margin:0 0 6px;}
+    .dp-inp-lbl svg{width:16px;height:16px;stroke:var(--brand);}
+    /* scroll-margin-bottom: when the keyboard reveal scrolls this field into
+       view — the browser's own scroll in Chrome, keyboard-aware.js's nudge in
+       Facebook's WebView — bring the submit button below it along for the
+       ride. Typing with the one button you need hidden behind the keyboard is
+       most of what "the popup doesn't work in Facebook" means in practice. */
+    .dp-inp{width:100%;padding:10px 14px;background:#fff;border:2px solid #cbd5e1;border-radius:12px;font-size:16px;font-weight:700;color:#0f172a;outline:none;transition:border-color .2s;letter-spacing:1px;margin-bottom:10px;box-sizing:border-box;scroll-margin-bottom:72px;scroll-margin-top:32px;}
+    .dp-inp::placeholder{font-size:14px;letter-spacing:0;color:#94a3b8;font-weight:500;}
+    .dp-inp:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-light);}
+    .dp-inp.error{border-color:#ef4444;box-shadow:0 0 0 3px rgba(239,68,68,.15);animation:dpShake .4s ease;}
+    @keyframes dpShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(6px)}60%{transform:translateX(-3px)}80%{transform:translateX(3px)}}
+    .dp-btn{width:100%;padding:12px;background:linear-gradient(135deg,var(--brand) 0%,var(--brand-dark) 100%);color:#fff;border:none;border-radius:14px;font-size:16px;font-weight:800;cursor:pointer;transition:all .2s;box-shadow:0 6px 20px rgba(0,0,0,.15);font-family:inherit;}
+    .dp-btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 8px 25px rgba(0,0,0,.2);}
+    .dp-btn:disabled{opacity:.7;cursor:not-allowed;transform:none;}
+    .dp-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:12px 24px;border-radius:50px;font-size:14px;font-weight:600;z-index:9999;white-space:nowrap;box-shadow:0 10px 30px rgba(0,0,0,.2);transition:bottom .15s ease;}
+    /* In hosts that let the keyboard cover the page (data-kb set), a toast
+       pinned 24px from the bottom is a toast shown to the keyboard. Lift it by
+       the keyboard's height; where the browser resizes the page (Chrome),
+       data-kb never appears and nothing moves. */
+    html[data-kb] .dp-toast{bottom:calc(24px + var(--kb-reserve, 0px));}
+    .dp-confirm{position:absolute;inset:0;z-index:10;background:rgba(255,255,255,.96);border-radius:28px;display:flex;align-items:center;justify-content:center;padding:24px;}
+    .dp-confirm-box{text-align:center;max-width:300px;}
+    .dp-confirm-ttl{font-size:17px;font-weight:800;color:#0f172a;margin:0 0 8px;}
+    .dp-confirm-msg{font-size:13.5px;color:#475569;font-weight:500;line-height:1.5;margin:0 0 16px;}
+    .dp-confirm-row{display:flex;gap:10px;justify-content:center;}
+    .dp-confirm-yes{background:#ef4444;color:#fff;border:none;border-radius:10px;padding:10px 16px;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;}
+    .dp-confirm-no{background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;border-radius:10px;padding:10px 16px;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;}
+</style>
+
+<div class="dp-overlay" id="pay-popup" hidden style="display:none">
+    <div class="dp-center">
+        <div class="dp-card" id="dp-card">
+            <div class="dp-strip">
+                <img src="" alt="" class="dp-strip-logo" id="dp-logo">
+                <span class="dp-strip-logo" id="dp-logo-bank" hidden style="display:none;align-items:center;justify-content:center;background:linear-gradient(135deg,#2563eb,#1e40af)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:24px;height:24px"><path d="M3 21h18M4 18h16M6 18v-7M10 18v-7M14 18v-7M18 18v-7M12 3 3 8h18L12 3z"/></svg>
+                </span>
+                <div>
+                    <p class="dp-strip-name" id="dp-strip-title"></p>
+                    <p class="dp-strip-sub"><span id="dp-app-name"></span> · নিরাপদ পেমেন্ট</p>
+                </div>
+                <button type="button" class="dp-close" id="dp-close" aria-label="বন্ধ করুন">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            <div class="dp-body">
+                <!-- Wallet switcher — balance short in one wallet? Switch here
+                     without losing the popup. Hidden for bank transfers: that
+                     is a different flow with its own dedicated door. Tabs for
+                     wallets missing from DP_CONFIG.numbers are removed at
+                     init; the whole row hides when fewer than two remain. -->
+                <div class="dp-tabs" id="dp-tabs">
+                    <button type="button" class="dp-tab" data-dp-tab="bkash">
+                        <img data-dp-logo="bkash" src="" alt="" width="20" height="20">
+                        <span>বিকাশ</span>
+                    </button>
+                    <button type="button" class="dp-tab" data-dp-tab="nagad">
+                        <img data-dp-logo="nagad" src="" alt="" width="20" height="20">
+                        <span>নগদ</span>
+                    </button>
+                    <button type="button" class="dp-tab" data-dp-tab="rocket">
+                        <img data-dp-logo="rocket" src="" alt="" width="20" height="20">
+                        <span>রকেট</span>
+                    </button>
+                </div>
+
+                <div class="dp-amount">
+                    <div class="dp-amount-left">
+                        <div class="dp-amount-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>
+                        </div>
+                        <span class="dp-amount-label-txt">মোট পরিমাণ</span>
+                    </div>
+                    <span class="dp-amount-val">৳<span id="dp-amount"></span></span>
+                </div>
+
+                <!-- Receiver number (wallets) -->
+                <div id="dp-wallet-receiver">
+                    <p class="dp-num-lbl">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                        যে নম্বরে টাকা পাঠাবেন
+                    </p>
+                    <div class="dp-num-box">
+                        <span class="dp-num" id="dp-number"></span>
+                        <button type="button" class="dp-copy" id="dp-copy">
+                            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                            <span id="dp-copy-txt">কপি করুন</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Receiver details (bank transfer) — rows are built at init
+                     from DP_CONFIG.bank; the whole section stays hidden when
+                     bank is null. -->
+                <div id="dp-bank-receiver" hidden style="display:none">
+                    <p class="dp-num-lbl">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M4 18h16M6 18v-7M10 18v-7M14 18v-7M18 18v-7M12 3 3 8h18L12 3z"/></svg>
+                        যে অ্যাকাউন্টে টাকা পাঠাবেন
+                    </p>
+                    <div class="dp-bank" id="dp-bank-box">
+                        <!-- rows injected here -->
+                        <button type="button" class="dp-copy-all" id="dp-copy-all" data-copy="">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                            <span id="dp-copy-all-txt">সব তথ্য কপি করুন</span>
+                        </button>
+                    </div>
+                </div>
+
+                <p class="dp-steps-ttl">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                    কীভাবে টাকা পাঠাবেন
+                </p>
+                <div class="dp-steps">
+                    <div class="dp-step"><span class="dp-step-n">১</span><span id="dp-step1">উপরের নম্বরটি <strong>কপি</strong> করুন</span></div>
+                    <div class="dp-step"><span class="dp-step-n">২</span><span id="dp-step2"><span class="dp-brand-label"></span> অ্যাপ থেকে <strong>Send Money</strong> করুন</span></div>
+                    <div class="dp-step"><span class="dp-step-n">৩</span><span id="dp-step3">নিচে <strong>আপনার নম্বর</strong> লিখে জমা দিন</span></div>
+                </div>
+
+                <label class="dp-inp-lbl" for="dp-ref">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                    <span id="dp-inp-lbl-txt">আপনি যে নম্বর থেকে টাকা পাঠিয়েছেন</span>
+                </label>
+                <input class="dp-inp" id="dp-ref" type="tel" inputmode="numeric" maxlength="11" placeholder="01XXXXXXXXX" autocomplete="off">
+
+                <button type="button" class="dp-btn" id="dp-submit">সাবমিট করুন</button>
+            </div>
+
+            <div class="dp-confirm" id="dp-confirm" hidden style="display:none">
+                <div class="dp-confirm-box">
+                    <p class="dp-confirm-ttl">পেমেন্ট বন্ধ করবেন?</p>
+                    <p class="dp-confirm-msg">আপনি কি নিশ্চিত পেমেন্ট প্রক্রিয়া বন্ধ করতে চান? আপনার দেওয়া তথ্য মুছে যাবে।</p>
+                    <div class="dp-confirm-row">
+                        <button type="button" class="dp-confirm-yes" id="dp-confirm-yes">হ্যাঁ, বন্ধ করুন</button>
+                        <button type="button" class="dp-confirm-no" id="dp-confirm-no">না, চালিয়ে যাই</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 2 · Companions. bd-phone.js must load BEFORE the popup script below;
+     keyboard-aware.js can load anywhere on the page, once. -->
+<script src="bd-phone.js"></script>
+<script src="keyboard-aware.js"></script>
+
+<script>
+    (function () {
+        var CFG = window.DP_CONFIG || {};
+        var NUMBERS = CFG.numbers || {};
+        var HAS_BANK = !!CFG.bank;
+        var SENDER_PREFILL = CFG.senderPrefill || {};
+        var ASSETS = (CFG.assetsBase || 'assets').replace(/\/+$/, '');
+        var BRANDS = {
+            bkash:  { label: 'বিকাশ',  en: 'bKash',  brand: '#E2136E', dark: '#b80e58', light: '#fcebf3', logo: ASSETS + '/bkash.webp' },
+            nagad:  { label: 'নগদ',   en: 'Nagad',  brand: '#F05921', dark: '#c94515', light: '#fff3ee', logo: ASSETS + '/nagad.webp' },
+            rocket: { label: 'রকেট',  en: 'Rocket', brand: '#8C3494', dark: '#6b277a', light: '#f7eef9', logo: ASSETS + '/rocket.webp' },
+            bank:   { label: 'ব্যাংক', en: 'Bank',   brand: '#2563eb', dark: '#1e40af', light: '#eaf1fe' }
+        };
+        var TRX_RE = /^[A-Za-z0-9]{10}$/;
+        var BANK_RE = /^[A-Za-z0-9\/-]{4,40}$/;
+
+        // Reopen an in-progress payment after a refresh / a trip to the wallet app.
+        var LS_OPEN = 'dp_pay_open_' + (CFG.popupKey || 'default');
+        var LS_REF = 'dp_pay_ref_' + (CFG.popupKey || 'default');
+        var LS_AMOUNT = 'dp_pay_amt_' + (CFG.popupKey || 'default');
+
+        var popup = document.getElementById('pay-popup');
+        var card = document.getElementById('dp-card');
+        var refInput = document.getElementById('dp-ref');
+        var submitBtn = document.getElementById('dp-submit');
+        var method = null;
+        var busy = false;
+        var currentAmount = 0;
+
+        function toBn(n) { return String(n).replace(/[0-9]/g, function (d) { return '০১২৩৪৫৬৭৮৯'[+d]; }); }
+        function showEl(el, show) { if (!el) return; el.hidden = !show; el.style.display = show ? '' : 'none'; }
+
+        /* Static-markup seams filled from config. */
+        document.getElementById('dp-app-name').textContent = CFG.appName || '';
+        document.querySelectorAll('[data-dp-logo]').forEach(function (img) {
+            img.src = ASSETS + '/' + img.getAttribute('data-dp-logo') + '.webp';
+        });
+
+        /* Prune wallet tabs the config does not offer; a single wallet needs
+           no switcher at all. */
+        var tabsEl = document.getElementById('dp-tabs');
+        tabsEl.querySelectorAll('.dp-tab').forEach(function (t) {
+            if (!NUMBERS[t.getAttribute('data-dp-tab')]) t.remove();
+        });
+        var hasTabs = tabsEl.querySelectorAll('.dp-tab').length > 1;
+        if (!hasTabs) showEl(tabsEl, false);
+
+        /* Bank receiver rows, built once from config. One tap hands over the
+           whole thing, labels included — ready to paste into the bank app's
+           notes, or a message to whoever does the transfer. Copying field by
+           field is the exception, not the rule. */
+        if (HAS_BANK) {
+            var bankBox = document.getElementById('dp-bank-box');
+            var copyAllBtn = document.getElementById('dp-copy-all');
+            var lines = [];
+            [
+                ['ব্যাংক', CFG.bank.bank_name, false],
+                ['অ্যাকাউন্ট হোল্ডার', CFG.bank.account_name, false],
+                ['অ্যাকাউন্ট নম্বর', CFG.bank.account_number, true],
+                ['ব্রাঞ্চ', CFG.bank.branch, false],
+                ['রাউটিং নম্বর', CFG.bank.routing_number, true]
+            ].forEach(function (row) {
+                if (!row[1]) return;
+                var div = document.createElement('div');
+                div.className = 'dp-bank-row';
+                var lbl = document.createElement('span');
+                lbl.className = 'dp-bank-lbl';
+                lbl.textContent = row[0];
+                var val = document.createElement('span');
+                val.className = 'dp-bank-val' + (row[2] ? ' mono' : '');
+                val.textContent = row[1];
+                div.appendChild(lbl); div.appendChild(val);
+                bankBox.insertBefore(div, copyAllBtn);
+                lines.push(row[0] + ': ' + row[1]);
+            });
+            copyAllBtn.setAttribute('data-copy', lines.join('\n'));
+        }
+
+        /* Toast — also exposed so the host page can reuse the same pill. */
+        var toastEl = null, toastTimer = null;
+        window.dpToast = function (msg) {
+            if (toastEl) toastEl.remove();
+            toastEl = document.createElement('div');
+            toastEl.className = 'dp-toast';
+            toastEl.textContent = msg;
+            document.body.appendChild(toastEl);
+            if (toastTimer) clearTimeout(toastTimer);
+            toastTimer = setTimeout(function () { if (toastEl) { toastEl.remove(); toastEl = null; } }, 3200);
+        };
+
+        function copyText(text, btn, doneLabel) {
+            var legacy = function () {
+                var i = document.createElement('input');
+                i.value = text; document.body.appendChild(i); i.select();
+                try { document.execCommand('copy'); } catch (e) { /* ignore */ }
+                document.body.removeChild(i);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(legacy);
+            else legacy();
+            if (btn) {
+                btn.classList.add('copied');
+                setTimeout(function () { btn.classList.remove('copied'); }, 2200);
+            }
+            window.dpToast(doneLabel || 'কপি হয়েছে!');
+        }
+
+        /** Open the popup for a provider with the amount to be sent. */
+        window.dpOpen = function (provider, amount, restoredRef) {
+            if (provider !== 'bank' && !NUMBERS[provider]) return;
+            if (provider === 'bank' && !HAS_BANK) return;
+
+            method = provider;
+            currentAmount = amount;
+            var b = BRANDS[provider];
+            var isRocket = provider === 'rocket';
+            var isBank = provider === 'bank';
+
+            card.style.setProperty('--brand', b.brand);
+            card.style.setProperty('--brand-dark', b.dark);
+            card.style.setProperty('--brand-light', b.light);
+
+            var logo = document.getElementById('dp-logo');
+            var bankLogo = document.getElementById('dp-logo-bank');
+            showEl(logo, !isBank);
+            showEl(bankLogo, isBank);
+            if (bankLogo && isBank) bankLogo.style.display = 'flex';
+            if (!isBank) { logo.src = b.logo; logo.alt = b.en; }
+
+            document.getElementById('dp-strip-title').innerHTML = isBank
+                ? b.label + ' ট্রান্সফার করুন'
+                : b.label + ' সেন্ড মানি করুন <span style="font-size:13px;font-weight:600;opacity:.9">(পার্সোনাল)</span>';
+            document.querySelectorAll('.dp-brand-label').forEach(function (el) { el.textContent = b.label; });
+
+            document.getElementById('dp-amount').textContent = toBn(amount % 1 === 0 ? amount : amount.toFixed(2));
+
+            showEl(document.getElementById('dp-wallet-receiver'), !isBank);
+            showEl(document.getElementById('dp-bank-receiver'), isBank);
+            if (!isBank) document.getElementById('dp-number').textContent = NUMBERS[provider];
+
+            document.getElementById('dp-step1').innerHTML = isBank
+                ? 'উপরের <strong>অ্যাকাউন্ট নম্বর</strong> কপি করুন'
+                : 'উপরের নম্বরটি <strong>কপি</strong> করুন';
+            document.getElementById('dp-step2').innerHTML = isBank
+                ? 'ব্যাংক অ্যাপ / ব্রাঞ্চ থেকে <strong>ট্রান্সফার</strong> করুন'
+                : '<span class="dp-brand-label">' + b.label + '</span> অ্যাপ থেকে <strong>Send Money</strong> করুন';
+            document.getElementById('dp-step3').innerHTML = (isRocket || isBank)
+                ? 'নিচে <strong>Transaction ID</strong> লিখে জমা দিন'
+                : 'নিচে <strong>আপনার নম্বর</strong> লিখে জমা দিন';
+            document.getElementById('dp-inp-lbl-txt').textContent = isBank
+                ? 'ট্রানজেকশন আইডি / রেফারেন্স'
+                : (isRocket ? 'আপনার Transaction ID (TrxID)' : 'আপনি যে নম্বর থেকে টাকা পাঠিয়েছেন');
+
+            refInput.type = (isRocket || isBank) ? 'text' : 'tel';
+            refInput.inputMode = (isRocket || isBank) ? '' : 'numeric';
+            refInput.maxLength = isBank ? 40 : (isRocket ? 10 : 14); // wallets: paste room for +880… before normalize trims
+            refInput.placeholder = isBank ? 'যেমন: FT26AB12CD' : (isRocket ? 'TRXID দিন' : '01XXXXXXXXX');
+            refInput.style.textTransform = (isRocket || isBank) ? 'uppercase' : '';
+            refInput.value = restoredRef || ((isRocket || isBank) ? '' : (SENDER_PREFILL[provider] || ''));
+
+            showEl(tabsEl, hasTabs && !isBank);
+            if (hasTabs) tabsEl.querySelectorAll('.dp-tab').forEach(function (t) {
+                t.classList.toggle('active', t.getAttribute('data-dp-tab') === provider);
+            });
+
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'সাবমিট করুন';
+            busy = false;
+
+            showEl(document.getElementById('dp-confirm'), false);
+            showEl(popup, true);
+            document.body.style.overflow = 'hidden';
+            localStorage.setItem(LS_OPEN, provider);
+            localStorage.setItem(LS_AMOUNT, String(amount));
+        };
+
+        function closePopup() {
+            localStorage.removeItem(LS_OPEN);
+            localStorage.removeItem(LS_REF);
+            localStorage.removeItem(LS_AMOUNT);
+            showEl(popup, false);
+            document.body.style.overflow = '';
+        }
+        window.dpClose = closePopup;  /* for the host page: close after a successful submit */
+
+        /* Closing loses the typed reference — confirm first. */
+        document.getElementById('dp-close').addEventListener('click', function () {
+            if (busy) return;
+            showEl(document.getElementById('dp-confirm'), true);
+        });
+        document.getElementById('dp-confirm-yes').addEventListener('click', closePopup);
+        document.getElementById('dp-confirm-no').addEventListener('click', function () {
+            showEl(document.getElementById('dp-confirm'), false);
+        });
+
+        // Smart-normalize pasted numbers for bKash/Nagad (+880…, hyphens,
+        // Bengali digits → 01XXXXXXXXX). Rocket/bank take a TrxID — leave it.
+        function normaliseRef() {
+            if (method === 'rocket' || method === 'bank' || !window.bdPhoneNormalize) return;
+            var v = window.bdPhoneNormalize(refInput.value);
+            if (refInput.value !== v) refInput.value = v;
+        }
+
+        // Same IME rule as bd-phone.js, and it matters more here than anywhere
+        // else on the site: this is the field standing between a buyer who has
+        // already sent the money and the order that records it. An open
+        // composition lives in a buffer the browser owns, so writing to .value
+        // mid-word snaps the caret to the end and leaves the IME rebuilding
+        // from text it no longer recognises. Normalise when it commits, never
+        // during. Clearing the error and saving the draft are safe either way.
+        var imeOpen = false;
+        refInput.addEventListener('compositionstart', function () { imeOpen = true; });
+        refInput.addEventListener('compositionend', function () { imeOpen = false; normaliseRef(); });
+        // Facebook's WebView has been seen committing a composition without
+        // ever firing compositionend (see keyboard-aware.js) — and a stuck
+        // imeOpen silences normalisation for the life of the popup. Blur
+        // commits any composition; trust that over an event that may never
+        // come.
+        refInput.addEventListener('blur', function () {
+            if (!imeOpen) return;
+            imeOpen = false;
+            normaliseRef();
+        });
+
+        refInput.addEventListener('input', function (e) {
+            if (!e.isComposing && !imeOpen) normaliseRef();
+            refInput.classList.remove('error');
+            localStorage.setItem(LS_REF, refInput.value);
+        });
+
+        // With the keyboard up, the submit button may be the one thing still
+        // hidden behind it — but every keyboard carries its own enter/done key,
+        // and that key is the one control a keyboard can never cover. 229 /
+        // isComposing is an IME mid-word claiming the keystroke: not ours.
+        refInput.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+            e.preventDefault();
+            submitBtn.click();
+        });
+
+        document.getElementById('dp-copy').addEventListener('click', function () {
+            var btn = document.getElementById('dp-copy');
+            copyText(NUMBERS[method], btn, 'নম্বর কপি হয়েছে!');
+            document.getElementById('dp-copy-txt').textContent = 'কপি হয়েছে ✓';
+            setTimeout(function () { document.getElementById('dp-copy-txt').textContent = 'কপি করুন'; }, 2500);
+        });
+
+        var copyAll = document.getElementById('dp-copy-all');
+        if (copyAll) copyAll.addEventListener('click', function () {
+            copyText(copyAll.getAttribute('data-copy') || '', copyAll, 'সব তথ্য কপি হয়েছে!');
+            var txt = document.getElementById('dp-copy-all-txt');
+            txt.textContent = 'কপি হয়েছে ✓';
+            setTimeout(function () { txt.textContent = 'সব তথ্য কপি করুন'; }, 2500);
+        });
+
+        submitBtn.addEventListener('click', function () {
+            // No composition survives to here — a tap blurred the field and
+            // Enter is gated on !isComposing — so one last normalise is safe,
+            // and it catches a paste whose compositionend the WebView ate.
+            normaliseRef();
+            var isRocket = method === 'rocket';
+            var isBank = method === 'bank';
+            var v = refInput.value.trim();
+            var valid = isBank ? BANK_RE.test(v) : (isRocket ? TRX_RE.test(v) : window.bdPhoneValid(v));
+            if (!valid) {
+                refInput.classList.add('error');
+                window.dpToast(isBank
+                    ? 'সঠিক ট্রানজেকশন আইডি / রেফারেন্স দিন (৪–৪০ অক্ষর)'
+                    : (isRocket ? 'সঠিক ১০ অক্ষরের Transaction ID দিন' : 'সঠিক মোবাইল নম্বর দিন (১১ সংখ্যা)'));
+                setTimeout(function () { refInput.classList.remove('error'); }, 1600);
+                return;
+            }
+            busy = true;
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'জমা হচ্ছে...';
+            localStorage.removeItem(LS_OPEN);
+            localStorage.removeItem(LS_REF);
+            localStorage.removeItem(LS_AMOUNT);
+            if (typeof window.dpOnSubmit === 'function') {
+                window.dpOnSubmit(method, (isRocket || isBank) ? v.toUpperCase() : v);
+            }
+        });
+
+        /* Balance short in the first wallet? Switch here without starting over. */
+        tabsEl.querySelectorAll('.dp-tab').forEach(function (tab) {
+            tab.addEventListener('click', function () {
+                var next = tab.getAttribute('data-dp-tab');
+                if (next === method || busy) return;
+                var keepRef = (method === 'bkash' || method === 'nagad') && (next === 'bkash' || next === 'nagad')
+                    ? refInput.value
+                    : '';
+                window.dpOpen(next, currentAmount, keepRef);
+                if (typeof window.dpOnSwitch === 'function') window.dpOnSwitch(next);
+            });
+        });
+
+        /* Restore an in-progress popup after refresh / returning from the app. */
+        var savedOpen = localStorage.getItem(LS_OPEN);
+        var savedAmount = parseFloat(localStorage.getItem(LS_AMOUNT) || '0');
+        if (savedOpen && savedAmount > 0) {
+            window.dpOpen(savedOpen, savedAmount, localStorage.getItem(LS_REF) || '');
+        }
+    })();
+</script>

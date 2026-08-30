@@ -26,6 +26,17 @@ import rocketLogo from "./assets/rocket.webp";
  * it a high z-index only outranks siblings INSIDE that ancestor, so a sticky
  * header elsewhere in the tree can paint OVER the "blurred" backdrop. At body
  * level the overlay sits in the root stacking context and dims everything.
+ *
+ * ── In-app browsers (Facebook, Instagram) — REQUIRED companion ────────────
+ * Facebook's WebView lets the on-screen keyboard cover the page without
+ * resizing it, and often without firing a visualViewport resize event, so the
+ * reference input can vanish behind the keyboard mid-typing. Ship
+ * ../vanilla/keyboard-aware.js on any page that renders this popup (it is
+ * framework-agnostic: one <script> tag in index.html). This component carries
+ * its half of the contract: scroll-margins on the input so the reveal brings
+ * the submit button along, a toast that lifts above the keyboard when the
+ * kit flags `html[data-kb]`, and Enter-to-submit so the keyboard's own enter
+ * key works when the button is the one thing still covered.
  */
 
 export type Provider = "bkash" | "nagad" | "rocket";
@@ -48,13 +59,34 @@ export const DEFAULT_BRANDS: Record<Provider, ProviderBrand> = {
   rocket: { label: "রকেট", en: "Rocket", brand: "#8C3494", dark: "#6b277a", light: "#f7eef9", logo: rocketLogo, usesTrxId: true },
 };
 
-const PHONE_RE = /^01[3-9]\d{8}$/; // BD mobile: 11 digits, 013x–019x
+// BD mobile: 11 digits starting 01 — deliberately silent about the operator
+// digit. Operators reshuffle their ranges; a hardcoded 013–019 list starts
+// rejecting real customers the day a new range opens. Mirror this server-side.
+const PHONE_RE = /^01\d{9}$/;
 const TRX_RE = /^[A-Za-z0-9]{10}$/; // MFS TrxID: 10 alphanumerics
 
 const toBn = (n: number | string) => String(n).replace(/[0-9]/g, (d) => "০১২৩৪৫৬৭৮৯"[+d]);
 
+/** Smart-normalize a pasted/typed BD number: Bengali digits → Latin,
+ *  strip +/hyphens/spaces, +880/880 → leading 0, "17…" (10 digits) → "017…". */
+const BN_DIGITS: Record<string, string> = { "০":"0","১":"1","২":"2","৩":"3","৪":"4","৫":"5","৬":"6","৭":"7","৮":"8","৯":"9" };
+export const bdPhoneNormalize = (raw: string): string => {
+  let digits = String(raw || "")
+    .replace(/[০-৯]/g, (d) => BN_DIGITS[d])
+    .replace(/\D+/g, "");
+  if (digits.startsWith("8801") && digits.length >= 13) digits = "0" + digits.slice(3);
+  if (digits.length === 10 && digits.charAt(0) === "1") digits = "0" + digits;
+  return digits.slice(0, 11);
+};
+
 /* ─── Popup-scoped CSS (all classes prefixed dp-* so nothing leaks) ─── */
 const POPUP_CSS = `
+/* The overlay is fixed and scrolls itself, so the page-level room reserved by
+   keyboard-aware.js cannot reach inside — the kit hands the measurement over
+   in --kb-reserve and this is where the popup spends it: the card gains
+   exactly the scroll range needed to lift the reference field clear of the
+   keyboard. !important because the center div carries inline padding. */
+html[data-kb] .dp-center{padding-bottom:calc(20px + var(--kb-reserve,0px)) !important;}
 .dp-card{margin:0 auto;background:#fff;border-radius:28px;width:100%;max-width:440px;box-shadow:0 16px 40px rgba(0,0,0,.12);animation:dpSlideUp .4s cubic-bezier(.34,1.45,.64,1) forwards;position:relative;font-family:'Anek Bangla','Hind Siliguri',sans-serif;}
 @keyframes dpSlideUp{from{opacity:0;transform:translateY(40px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
 .dp-strip{background:linear-gradient(135deg,var(--brand) 0%,var(--brand-dark) 100%);border-radius:28px 28px 0 0;padding:16px;display:flex;align-items:center;gap:12px;position:relative;}
@@ -85,7 +117,7 @@ const POPUP_CSS = `
 .dp-step-n{background:var(--brand);color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;}
 .dp-inp-lbl{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:700;color:#334155;margin:0 0 8px;}
 .dp-inp-lbl svg{width:16px;height:16px;stroke:var(--brand);}
-.dp-inp{width:100%;padding:14px 16px;background:#fff;border:2px solid #cbd5e1;border-radius:12px;font-size:18px;font-weight:700;color:#0f172a;outline:none;transition:border-color .2s;letter-spacing:1px;margin-bottom:14px;box-sizing:border-box;}
+.dp-inp{width:100%;padding:14px 16px;background:#fff;border:2px solid #cbd5e1;border-radius:12px;font-size:18px;font-weight:700;color:#0f172a;outline:none;transition:border-color .2s;letter-spacing:1px;margin-bottom:14px;box-sizing:border-box;scroll-margin-bottom:80px;scroll-margin-top:32px;}
 .dp-inp::placeholder{font-size:14px;letter-spacing:0;color:#94a3b8;font-weight:500;}
 .dp-inp:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-light);}
 .dp-inp.error{border-color:#ef4444;box-shadow:0 0 0 3px rgba(239,68,68,.15);animation:dpShake .4s ease;}
@@ -94,7 +126,8 @@ const POPUP_CSS = `
 .dp-btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 8px 25px rgba(0,0,0,.2);}
 .dp-btn:disabled{opacity:.7;cursor:not-allowed;transform:none;}
 .dp-btn.success{background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 6px 20px rgba(16,185,129,.3);}
-.dp-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:12px 24px;border-radius:50px;font-size:14px;font-weight:600;z-index:2147483647;white-space:nowrap;box-shadow:0 10px 30px rgba(0,0,0,.2);}
+.dp-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:12px 24px;border-radius:50px;font-size:14px;font-weight:600;z-index:2147483647;white-space:nowrap;box-shadow:0 10px 30px rgba(0,0,0,.2);transition:bottom .15s ease;}
+html[data-kb] .dp-toast{bottom:calc(24px + var(--kb-reserve,0px));}
 .dp-confirm{position:absolute;inset:0;background:rgba(15,23,42,.55);backdrop-filter:blur(2px);border-radius:28px;display:flex;align-items:center;justify-content:center;padding:20px;z-index:5;}
 .dp-confirm-card{background:#fff;border-radius:18px;padding:20px;max-width:300px;width:100%;text-align:center;box-shadow:0 16px 40px rgba(0,0,0,.2);}
 .dp-confirm-ttl{font-size:16px;font-weight:800;color:#0f172a;margin:0 0 6px;}
@@ -201,6 +234,13 @@ export function SendMoneyPopup({
   const [toast, setToast] = useState("");
   const [confirming, setConfirming] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // An IME (Bangla keyboard, Gboard suggestions, swipe typing) holds
+  // half-finished text in a composition the browser owns; rewriting the value
+  // mid-composition snaps the caret and corrupts the word. Normalize only when
+  // the composition commits — and treat blur as a commit, because Facebook's
+  // WebView has been seen swallowing compositionend entirely.
+  const imeOpen = useRef(false);
+  const normalizeIfPhone = (v: string) => (isTrx ? v : bdPhoneNormalize(v));
 
   // Lock background scroll while open.
   useEffect(() => {
@@ -235,7 +275,8 @@ export function SendMoneyPopup({
   };
 
   const submit = async () => {
-    const v = ref.trim();
+    // One last normalize catches a paste whose compositionend never fired.
+    const v = normalizeIfPhone(ref.trim());
     const ok = isTrx ? TRX_RE.test(v) : PHONE_RE.test(v);
     if (!ok) {
       setErr(true);
@@ -257,8 +298,8 @@ export function SendMoneyPopup({
 
   return createPortal(
     <div className="fixed inset-0 z-[2147483000] bg-slate-900/55 backdrop-blur-sm overflow-y-auto"
-      style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.55)", backdropFilter: "blur(4px)", overflowY: "auto", zIndex: 2147483000 }}>
-      <div style={{ display: "flex", minHeight: "100%", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+      style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.55)", backdropFilter: "blur(4px)", overflowY: "auto", overscrollBehavior: "contain", zIndex: 2147483000 }}>
+      <div className="dp-center" style={{ display: "flex", minHeight: "100%", alignItems: "center", justifyContent: "center", padding: "20px" }}>
         <style>{POPUP_CSS}</style>
         <div className="dp-card" style={{ ["--brand" as any]: b.brand, ["--brand-dark" as any]: b.dark, ["--brand-light" as any]: b.light }}>
           {/* Header strip */}
@@ -309,11 +350,33 @@ export function SendMoneyPopup({
               className={`dp-inp${err ? " error" : ""}`}
               type={isTrx ? "text" : "tel"}
               inputMode={isTrx ? undefined : "numeric"}
-              maxLength={isTrx ? 10 : 11}
+              maxLength={isTrx ? 10 : 14} /* phones: paste room for +880… before normalize trims */
               placeholder={isTrx ? "TRXID দিন" : "01XXXXXXXXX"}
               style={isTrx ? { textTransform: "uppercase" } : undefined}
               value={ref}
-              onChange={(e) => setRef(e.target.value)}
+              onChange={(e) => {
+                const raw = e.target.value;
+                const mid = imeOpen.current || (e.nativeEvent as InputEvent).isComposing;
+                setRef(mid ? raw : normalizeIfPhone(raw));
+              }}
+              onCompositionStart={() => { imeOpen.current = true; }}
+              onCompositionEnd={(e) => {
+                imeOpen.current = false;
+                setRef(normalizeIfPhone((e.target as HTMLInputElement).value));
+              }}
+              onBlur={() => {
+                if (!imeOpen.current) return;
+                imeOpen.current = false;
+                setRef((v) => normalizeIfPhone(v));
+              }}
+              onKeyDown={(e) => {
+                /* The keyboard's own enter key is the one submit control the
+                   keyboard can never cover. 229/isComposing = an IME mid-word
+                   claiming the keystroke: not ours. */
+                if (e.key !== "Enter" || e.nativeEvent.isComposing || e.keyCode === 229) return;
+                e.preventDefault();
+                if (!busy && !done) submit();
+              }}
               disabled={busy || done}
             />
 
