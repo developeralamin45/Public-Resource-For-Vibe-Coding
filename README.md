@@ -12,8 +12,7 @@ agents: copy the files, follow the recipe, wire the few project-specific seams.
 | Resource | What it gives you | Stack |
 |---|---|---|
 | [**bKash · Nagad · Rocket — Send-Money Checkout**](./bkash-nagad-rocket-payment-kit/) | Pixel-faithful Bangladeshi MFS payment method picker + send-money popup, with logos bundled | React + TypeScript |
-| [**Transactional Email — Master Kit**](./transactional-email-master-kit/) | The whole email system, not just the sender: a catalogue of every email your app sends, each one editable and switchable by the admin, plus quiet hours, duplicate suppression, delivery analytics and an A-to-Z credentials guide. Your agent reads your codebase and builds the right catalogue for it — order emails for a store, billing for a SaaS, appointments for a clinic | React + Laravel |
-| [**Email Setup (Gmail API + SMTP fallback)**](./gmail-api-email-setup-kit/) | The minimal sender on its own: settings + setup guide + test button. Superseded by the master kit above — use this only if you want nothing but credentials and a send call | React + Laravel |
+| [**Transactional Email**](./transactional-email-kit/) | The whole email system, not just the sender: a catalogue of every email your app sends, each one editable and switchable by the admin, plus quiet hours, duplicate suppression, delivery analytics and an A-to-Z credentials guide. Your agent reads your codebase and builds the right catalogue for it — order emails for a store, billing for a SaaS, appointments for a clinic | React + Laravel |
 | [**Continue with Google (OAuth)**](./continue-with-google-oauth-kit/) | Secure "Continue with Google" button + server-side token verification + login/register two-step flow | React + Laravel |
 | [**GitHub Actions Auto-Deploy**](./github-actions-laravel-deploy-kit/) | Push to `master` → tested, built, rsynced, migrated behind a DB backup, every cache busted. Includes the SSH-key + repository-secrets walkthrough | GitHub Actions + Laravel + Vite |
 | [**Laravel Auto-Deploy — cPanel / shared hosting (no SSH)**](./cpanel-ftp-laravel-deploy-kit/) | The same push-to-live pipeline for hosting that only gives you FTP: builds on the runner, ships the release as **one zip** instead of 25,000 FTP transfers (the 30–50 minute first deploy), then unpacks and migrates through a token-protected PHP hook | GitHub Actions + Laravel + cPanel |
@@ -34,12 +33,29 @@ Or clone into a short path (`C:\kits`) instead of somewhere under `Documents`.
 
 ## 🤖 How to use with an AI agent
 
-Point your agent at the resource folder (or paste its `RECIPE.md`) and say:
+**Copy this, swap the link for the resource you want, paste it into your agent:**
 
-> "Implement this in my project, same to same. Follow RECIPE.md and wire it to my backend."
+```
+Read https://github.com/developeralamin45/Public-Resource-For-Vibe-Coding/tree/main/transactional-email-kit
+and implement it in this project. Follow its RECIPE.md: inspect my codebase
+first, adapt it to what this project actually is, then tell me what I need to
+do myself.
+```
 
-The agent reads the recipe, copies the component + assets, and adapts the seams
-(endpoints, config, labels) to your stack.
+That is all the prompt you need. The link alone is usually *not* enough — most
+agents will not fetch a URL and start work unaccompanied — but one sentence
+plus the link is, because every resource ships a `RECIPE.md` written as a brief
+for the agent: what to inspect, what to decide, what to copy, and what to hand
+back to you at the end.
+
+There is also an [`AGENTS.md`](./AGENTS.md) at the repo root, which agents that
+follow that convention read automatically.
+
+**What a good resource does for you:** it does not just copy files. It reads
+your models and routes, works out what kind of product you are building, and
+builds the feature to fit — e-commerce gets order emails, a SaaS gets billing
+emails, a clinic gets appointment reminders. Then it prints the short list of
+things only a human can do (create credentials, paste keys).
 
 ## 🧑‍💻 How to use by hand
 

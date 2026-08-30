@@ -1,4 +1,4 @@
-# 📧 Transactional Email — Master Kit
+# 📧 Transactional Email Kit
 
 A complete, **admin-controlled** email system you can drop into any project.
 Not just "how do I send mail" — the whole thing around it: which emails exist,
@@ -45,12 +45,14 @@ No Mailable class. No Blade file. No deploy when the wording changes.
 
 ### 🤖 Hand it to your AI agent
 
-Point your agent at this folder and say:
+Copy this into your agent — the link plus one sentence is all it needs:
 
-> "Add this email system to my project. Follow RECIPE.md — work out what kind of
-> project this is, build the right event catalogue for it, wire it behind my
-> admin auth, replace my existing mail code, then tell me exactly what I need to
-> do."
+```
+Read https://github.com/developeralamin45/Public-Resource-For-Vibe-Coding/tree/main/transactional-email-kit
+and implement it in this project. Follow its RECIPE.md: inspect my codebase
+first, adapt it to what this project actually is, then tell me what I need to
+do myself.
+```
 
 [`RECIPE.md`](./RECIPE.md) tells the agent to inspect the codebase first and
 *fit the catalogue to what the project actually is* — order emails for a store,
