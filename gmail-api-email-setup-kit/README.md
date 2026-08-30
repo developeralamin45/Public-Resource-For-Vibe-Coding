@@ -1,5 +1,15 @@
 # 📧 Email Setup Kit — Gmail API + SMTP fallback, with Admin Panel
 
+> **👉 Looking for the full system?** [**Transactional Email — Master
+> Kit**](../transactional-email-master-kit/) supersedes this one. It keeps
+> everything here (Gmail API + SMTP fallback, settings panel, setup guide, test
+> sender) and adds the parts that turn a sender into a system: a catalogue of
+> every email your app sends, per-event on/off switches, admin-editable wording
+> with live preview, quiet hours with a real queue, and duplicate suppression.
+>
+> This kit stays for projects that want nothing more than credentials and a
+> `send()` call.
+
 A complete, admin-managed transactional-email system you can drop into any
 project: a polished **super-admin panel** (this-month analytics, settings form,
 one-click **A-to-Z setup guide**, and a test-email sender) backed by a
