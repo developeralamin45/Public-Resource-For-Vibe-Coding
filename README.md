@@ -13,11 +13,15 @@ agents: copy the files, follow the recipe, wire the few project-specific seams.
 |---|---|---|
 | [**bKash · Nagad · Rocket · Bank — Send-Money Checkout**](./bkash-nagad-rocket-payment-kit/) | Pixel-faithful Bangladeshi manual-payment checkout, four methods: wallet picker + send-money popup with in-popup wallet switching, bank-transfer details with one-tap copy-all, refresh-proof in-progress payments, smart paste normalization — plus a soft-keyboard & Bangla-IME survival kit for Facebook's in-app browser. Logos bundled | Vanilla JS (any stack) + React |
 | [**SMTP Setup Kit**](./smtp-setup-kit/) | The whole email system, not just the sender: a catalogue of every email your app sends, each one editable and switchable by the admin, plus quiet hours, duplicate suppression, delivery analytics and an A-to-Z credentials guide. Your agent reads your codebase and builds the right catalogue for it — order emails for a store, billing for a SaaS, appointments for a clinic | React + Laravel |
-| [**Continue with Google (OAuth)**](./continue-with-google-oauth-kit/) | Secure "Continue with Google" button + server-side token verification + login/register two-step flow | React + Laravel |
+| [**Login & Registration + Continue with Google**](./login-registration-google-auth-kit/) | The whole front door: one auth screen with sliding tabs, floating labels and dark mode, plus a Google button verified server-side. A known email signs straight in; a new one goes to registration already filled in, so no half-made accounts. The Client ID lives in an admin field with the console walkthrough beside it — the owner switches it on without touching a server | Blade + Laravel + React admin |
 | [**GitHub Actions Auto-Deploy**](./github-actions-laravel-deploy-kit/) | Push to `master` → tested, built, rsynced, migrated behind a DB backup, every cache busted. Includes the SSH-key + repository-secrets walkthrough | GitHub Actions + Laravel + Vite |
 | [**Laravel Auto-Deploy — cPanel / shared hosting (no SSH)**](./cpanel-ftp-laravel-deploy-kit/) | The same push-to-live pipeline for hosting that only gives you FTP: builds on the runner, ships the release as **one zip** instead of 25,000 FTP transfers (the 30–50 minute first deploy), then unpacks and migrates through a token-protected PHP hook | GitHub Actions + Laravel + cPanel |
 
-_More resources coming: login/registration flow, and more._
+_More resources coming._
+
+> The old `continue-with-google-oauth-kit/` folder is retired — the login &
+> registration kit above is a superset of it. Old links still resolve and point
+> the way over.
 
 ## ⚠️ Cloning on Windows
 

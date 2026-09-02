@@ -1,0 +1,142 @@
+/* ---------------------------------------------------------------------------
+   Auth theme — append to the project's Tailwind entry (resources/css/app.css).
+
+   Tailwind v4. If the project is on v3, the same tokens go in
+   tailwind.config.js under theme.extend.colors and the @utility blocks become
+   plain classes in a @layer components.
+
+   Everything here is theme-aware: light is the default on :root, and `.dark`
+   on <html> flips it. The auth layout sets that class before first paint.
+
+   Only the pieces the auth pages need are here. If the project already has its
+   own colour tokens, keep them and delete this file — the markup only asks for
+   ink-*, fg-*, brand-* and accent-*, so remapping those four families onto the
+   project's palette is the whole integration.
+--------------------------------------------------------------------------- */
+
+@theme {
+    /* Brand — the primary. Swap the hexes for the project's own. */
+    --color-brand-50: #f5f3ff;
+    --color-brand-100: #ede9fe;
+    --color-brand-200: #ddd6fe;
+    --color-brand-300: #c4b5fd;
+    --color-brand-400: #a78bfa;
+    --color-brand-500: #8b5cf6;
+    --color-brand-600: #7c3aed;
+    --color-brand-700: #6d28d9;
+    --color-brand-800: #5b21b6;
+    --color-brand-900: #4c1d95;
+    --color-brand-950: #2e1065;
+
+    /* Accent — buttons and calls to action; brighter than the brand. */
+    --color-accent-300: #d8b4fe;
+    --color-accent-400: #c084fc;
+    --color-accent-500: #a855f7;
+    --color-accent-600: #9333ea;
+    --color-accent-700: #7e22ce;
+}
+
+/* Class-based dark mode: `.dark` on <html> flips the theme. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------------------
+   Surfaces, borders and foreground text.
+
+   The `ink-*` scale is remapped onto these tokens so every `bg-ink-*` /
+   `border-ink-*` utility flips with the theme on its own, and `fg-*` gives
+   theme-aware text colours. Nothing in the markup names a raw colour.
+--------------------------------------------------------------------------- */
+:root {
+    /* Light — white cards on a soft tinted canvas */
+    --surface-0: #f7f5fb; /* page background   (ink-950) */
+    --surface-1: #ffffff; /* cards / panels    (ink-900) */
+    --surface-2: #f1eef8; /* inputs / raised   (ink-850) */
+    --surface-3: #e8e4f3; /* hover / stronger  (ink-800) */
+    --line: #e5e1f0; /* borders                (ink-700) */
+    --line-strong: #cfc8e2; /* stronger        (ink-600) */
+
+    --fg: #171130; /* headings / strong text */
+    --fg-muted: #3b3554; /* body text */
+    --fg-subtle: #5f597a; /* secondary */
+    --fg-faint: #837e99; /* faint / meta */
+
+    --glass-border: rgba(23, 12, 48, 0.08);
+}
+
+.dark {
+    /* Dark — deep tinted navy, matched to the brand */
+    --surface-0: #0d0824;
+    --surface-1: #130b31;
+    --surface-2: #1a0f40;
+    --surface-3: #22144f;
+    --line: #2f1d66;
+    --line-strong: #402b88;
+
+    --fg: #ffffff;
+    --fg-muted: #d3cde6;
+    --fg-subtle: #a29ac0;
+    --fg-faint: #736c94;
+
+    --glass-border: rgba(255, 255, 255, 0.1);
+}
+
+/* `inline` keeps these as live var() references, so they answer the
+   :root / .dark override at runtime rather than being baked in. */
+@theme inline {
+    --color-ink-950: var(--surface-0);
+    --color-ink-900: var(--surface-1);
+    --color-ink-850: var(--surface-2);
+    --color-ink-800: var(--surface-3);
+    --color-ink-700: var(--line);
+    --color-ink-600: var(--line-strong);
+
+    --color-fg: var(--fg);
+    --color-fg-muted: var(--fg-muted);
+    --color-fg-subtle: var(--fg-subtle);
+    --color-fg-faint: var(--fg-faint);
+}
+
+body {
+    background-color: var(--surface-0);
+    color: var(--fg-muted);
+    -webkit-font-smoothing: antialiased;
+}
+
+/* The card the auth form sits on. */
+@utility glass-strong {
+    background-color: color-mix(in srgb, var(--surface-1) 75%, transparent);
+    -webkit-backdrop-filter: blur(22px) saturate(150%);
+    backdrop-filter: blur(22px) saturate(150%);
+    border: 1px solid var(--glass-border);
+}
+
+/* ---------------------------------------------------------------------------
+   The auth page background.
+
+   The two ambient glows are painted on the body itself rather than on absolutely
+   positioned child divs. A child div is sized to the viewport it was laid out
+   in; pinch-zoom out on a phone and the page grows past it, leaving the glow
+   cut off along a hard visible edge. A background-image on the body has no such
+   box — it is repainted against whatever the page's size turns out to be.
+
+   The trade is that the glows are corner-*biased* rather than corner-anchored:
+   a bloom pinned to the corner is at full strength exactly where it gets cut,
+   which is the hard edge being removed.
+--------------------------------------------------------------------------- */
+.auth-shell {
+    background-color: var(--surface-0);
+    background-image:
+        radial-gradient(
+            closest-side at 42% 22%,
+            color-mix(in srgb, var(--color-accent-500) 30%, transparent) 0%,
+            color-mix(in srgb, var(--color-accent-500) 15%, transparent) 40%,
+            transparent 100%
+        ),
+        radial-gradient(
+            closest-side at 60% 82%,
+            color-mix(in srgb, var(--color-brand-500) 26%, transparent) 0%,
+            color-mix(in srgb, var(--color-brand-500) 12%, transparent) 40%,
+            transparent 100%
+        );
+    background-repeat: no-repeat;
+}
