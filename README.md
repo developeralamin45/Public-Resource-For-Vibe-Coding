@@ -19,8 +19,10 @@ agents: copy the files, follow the recipe, wire the few project-specific seams.
 
 _More resources coming._
 
-> The old `continue-with-google-oauth-kit/` folder is retired — the login &
-> registration kit above is a superset of it. Old links still resolve and point
+> Two folders have moved: `continue-with-google-oauth-kit/` is retired (the
+> login & registration kit above is a superset of it), and the payment kit is
+> now `bkash-nagad-rocket-bank-payment-kit/` — it gained bank transfer as a
+> fourth method, so the name gained it too. Old links still resolve and point
 > the way over.
 
 ## ⚠️ Cloning on Windows
