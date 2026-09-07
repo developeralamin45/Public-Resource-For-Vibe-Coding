@@ -39,11 +39,12 @@ It is intentionally **backend-agnostic**: UI + validation + UX only.
 | Variant | Use when | Coverage |
 |---|---|---|
 | **`vanilla/`** — the master copy | Laravel/Blade, Django, Rails, plain PHP, any server-rendered page — and the porting source for everything else | All four methods, tabs, refresh-restore, prefill, keyboard kit — the full production feature set |
-| **`react/`** | React SPA that only needs the three wallets, fast | Wallet popup + picker. Bank flow, tabs and refresh-restore are not ported yet — port them from `vanilla/` if the project needs them |
+| **`react/`** | React / Next SPA | The same four methods, tabs, refresh-restore and prefill, as props |
 
-**`vanilla/` is canonical.** When the two disagree, or when you need a feature
-`react/` lacks, port from `vanilla/send-money-popup.html` — the DOM structure,
-class names (`dp-*`) and logic transfer almost line by line.
+**`vanilla/` is canonical.** The two are at feature parity, so pick by stack —
+but when they disagree, `vanilla/send-money-popup.html` is right, and a fix
+belongs in both. Its DOM structure, class names (`dp-*`) and logic transfer
+almost line by line.
 
 ## 3. Files
 
@@ -59,7 +60,7 @@ vanilla/
 react/
 ├── SendMoneyPopup.tsx      ← the core popup (import this if you have your own picker)
 ├── SendMoneyCheckout.tsx   ← picker + pay button + popup (the full flow)
-├── assets/{bkash,nagad,rocket}.webp
+├── assets/{bkash,nagad,rocket}.webp   ← bank draws an inline SVG tile, no asset
 ├── assets.d.ts             ← lets TS import .webp (delete if the project has one)
 └── demo/App.tsx            ← usage example (don't ship; reference only)
 ```
@@ -106,6 +107,12 @@ import { SendMoneyCheckout } from "@/components/payment/SendMoneyCheckout";
 <SendMoneyCheckout
   amount={490}
   receivers={{ bkash: "017...", nagad: "018...", rocket: "019..." }}  // YOUR merchant numbers
+  bank={{                                    // omit → the bank method never shows
+    bank_name: "...", account_name: "...", account_number: "...",
+    branch: "...", routing_number: "...",    // these two may be ""
+  }}
+  popupKey={`order-${order.id}`}             // turns on reopen-after-refresh
+  senderPrefill={{ bkash: "017..." }}        // returning buyer (optional)
   onSubmit={async (provider, reference) => {
     await api.post("/payment-claim", { provider, reference }); // <-- YOUR endpoint
     // throw new Error("এই নম্বর আগেই ব্যবহৃত") → toast + popup stays open
@@ -114,18 +121,29 @@ import { SendMoneyCheckout } from "@/components/payment/SendMoneyCheckout";
 />
 ```
 
+Serve `receivers` / `bank` from the server (an admin-editable settings row if
+the project has a panel) — never hardcode a merchant number in the bundle.
+Already have your own method picker? Import `<SendMoneyPopup>` alone and pass
+it `provider`, `receivers`, `bank` and `onSwitch`.
+
 ## 5. The seams (what changes per project)
 
 | Seam | vanilla | react |
 |---|---|---|
-| Merchant numbers / bank details | `DP_CONFIG.numbers` / `DP_CONFIG.bank` (fill server-side) | `receivers` prop |
+| Merchant numbers / bank details | `DP_CONFIG.numbers` / `DP_CONFIG.bank` (fill server-side) | `receivers` / `bank` props |
 | Amount | `dpOpen(provider, amount)` | `amount` prop |
 | Backend claim endpoint | your `window.dpOnSubmit` | your `onSubmit` |
 | Post-success action | redirect or `dpClose()` in `dpOnSubmit` | `onSuccess` |
 | Brand/app name | `DP_CONFIG.appName` | `popupLabels.brandSubtitle` |
-| Refresh-restore namespace | `DP_CONFIG.popupKey` (one per checkout page) | not ported |
-| Sender prefill (returning buyer) | `DP_CONFIG.senderPrefill` | not ported |
+| Refresh-restore namespace | `DP_CONFIG.popupKey` (one per checkout page) | `popupKey` prop |
+| Sender prefill (returning buyer) | `DP_CONFIG.senderPrefill` | `senderPrefill` prop |
+| Wallet switched in-popup | `window.dpOnSwitch` | `onSwitch` (the picker syncs itself) |
+| All UI copy | edit the markup | `popupLabels` (every string, incl. bank rows) |
 | Logo folder | `DP_CONFIG.assetsBase` | bundler imports |
+
+Both variants namespace the refresh-restore under the same
+`dp_pay_{open,ref,amt}_<popupKey>` keys, so a project migrating vanilla → React
+does not strand a buyer's half-typed reference mid-payment.
 
 ## 6. Backend contract (implement on the host's server)
 
@@ -207,8 +225,12 @@ markup and no config):
 - **Background scroll locks** while the popup is open (`body.overflow=hidden`);
   the buyer leaves to the wallet app and comes back — the page must not have
   scrolled away underneath.
-- **Wallet maxLength is 14, not 11** — paste room for `+8801…` before the
-  normalizer trims it.
+- **Wallet maxLength is 20, not 11** — the browser enforces `maxLength` on
+  paste *before* any script sees the text, so the field must hold the longest
+  form a buyer might paste (`+880 1712-345678`, 16 chars) intact. Clip it to
+  11 — or to the 14 this kit shipped until its own paste test caught it — and
+  a valid pasted number arrives mangled, then gets rejected. The normalizer is
+  the real cap: it trims to 11 digits on commit.
 - **React: the popup is portaled to `<body>`** so its overlay escapes every
   ancestor stacking context; un-portal it and a sticky header paints over the
   backdrop.
@@ -229,7 +251,11 @@ Desktop/Chrome:
 5. Refresh mid-payment: the popup reopens with wallet, amount and typed
    reference intact. Submit or confirmed-close clears the restore.
 6. Bank flow (if configured): details render, copy-all copies every row with
-   labels, submit validates the reference.
+   labels, submit validates the reference. No wallet tabs appear on bank — it
+   is a one-way door.
+
+Both variants are expected to pass 1–6 identically. If the React one diverges,
+`vanilla/` is the answer and `react/` is what needs fixing.
 
 Mobile — **test inside the Facebook app's browser, not just Chrome** (share the
 URL to yourself on Messenger and open it from there):

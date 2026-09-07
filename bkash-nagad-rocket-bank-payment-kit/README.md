@@ -41,8 +41,8 @@ app name) — no redesign, no re-sourcing assets.
 - **Any stack (the master copy):** paste `vanilla/send-money-popup.html` into
   your checkout page, load `vanilla/bd-phone.js` + `vanilla/keyboard-aware.js`,
   fill the `DP_CONFIG` block. Done.
-- **React:** copy `react/` and render `<SendMoneyCheckout />` (three wallets;
-  see RECIPE §2 for what to port from `vanilla/` if you need bank/tabs).
+- **React:** copy `react/` and render `<SendMoneyCheckout />` — all four
+  methods, tabs, refresh-restore and prefill, same as `vanilla/`.
 
 ## What's in the box
 
@@ -54,10 +54,10 @@ vanilla/                         ← the production-faithful MASTER COPY (any st
 ├── keyboard-aware.js            ← soft-keyboard survival kit (page-level, framework-agnostic)
 ├── bd-phone.js                  ← BD phone smart-normalizer (Bangla-IME safe)
 └── assets/{bkash,nagad,rocket}.webp
-react/                           ← React + TypeScript variant (wallet flow)
+react/                           ← React + TypeScript variant (same feature set)
 ├── SendMoneyPopup.tsx           ← the core popup (self-contained)
 ├── SendMoneyCheckout.tsx        ← picker + pay bar + popup (full flow)
-├── assets/{bkash,nagad,rocket}.webp
+├── assets/{bkash,nagad,rocket}.webp   ← bank draws its own tile, no logo to bundle
 ├── assets.d.ts                  ← .webp TypeScript shim
 └── demo/App.tsx                 ← runnable usage example
 ```
@@ -79,6 +79,9 @@ react/                           ← React + TypeScript variant (wallet flow)
   survive a refresh or a trip to the wallet app.
 - **Wallet switching in-popup** — balance short in bKash? Switch to Nagad
   without starting over; the typed sender number survives.
+- **Bank transfer, when a wallet won't do** — the full account (bank, holder,
+  number, branch, routing) with one tap that copies every row, labels included,
+  and a reference field that takes what banks actually print.
 - **Keyboard's enter key submits** — the one control the keyboard can't cover.
 
 ## Notes

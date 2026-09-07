@@ -236,7 +236,7 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
                     <span id="dp-inp-lbl-txt">আপনি যে নম্বর থেকে টাকা পাঠিয়েছেন</span>
                 </label>
-                <input class="dp-inp" id="dp-ref" type="tel" inputmode="numeric" maxlength="11" placeholder="01XXXXXXXXX" autocomplete="off">
+                <input class="dp-inp" id="dp-ref" type="tel" inputmode="numeric" maxlength="20" placeholder="01XXXXXXXXX" autocomplete="off">
 
                 <button type="button" class="dp-btn" id="dp-submit">সাবমিট করুন</button>
             </div>
@@ -414,7 +414,12 @@
 
             refInput.type = (isRocket || isBank) ? 'text' : 'tel';
             refInput.inputMode = (isRocket || isBank) ? '' : 'numeric';
-            refInput.maxLength = isBank ? 40 : (isRocket ? 10 : 14); // wallets: paste room for +880… before normalize trims
+            // Wallets get generous paste room, not 11: a buyer pastes
+            // "+880 1712-345678" (16 chars) and the browser enforces maxLength
+            // BEFORE the normalizer ever sees it — clip it here and a valid
+            // number arrives mangled, then gets rejected. The normalizer is
+            // the real cap; it trims to 11 digits on commit.
+            refInput.maxLength = isBank ? 40 : (isRocket ? 10 : 20);
             refInput.placeholder = isBank ? 'যেমন: FT26AB12CD' : (isRocket ? 'TRXID দিন' : '01XXXXXXXXX');
             refInput.style.textTransform = (isRocket || isBank) ? 'uppercase' : '';
             refInput.value = restoredRef || ((isRocket || isBank) ? '' : (SENDER_PREFILL[provider] || ''));
