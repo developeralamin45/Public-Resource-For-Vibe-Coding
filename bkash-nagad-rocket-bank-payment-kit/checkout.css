@@ -1,0 +1,1463 @@
+/* ═══════════════════════════════════════════════════════════════════
+   bKash · Nagad · Rocket · Bank — send-money checkout: the stylesheet.
+
+   Every rule below is lifted, measurement for measurement, from the
+   production landing page this kit mirrors (smartvoicewriter.com, the
+   `landingCss` block of src/pages/Landing.tsx, 2026-09-22). Only the scope
+   class changed: `.bd-pay` there is `.bd-pay` here, and the keyframes
+   carry a `bdp` prefix so they cannot collide with the host page's.
+
+   Shared by BOTH variants (vanilla/ and react/). The DOM they build carries
+   the same class names, so the two render pixel for pixel alike — and a
+   design change is one edit, here, not two.
+
+   Do not "tidy" the numbers. Each one was arrived at on a phone: the popup
+   fits on one screen with the bank's five rows, the four method tiles fit on
+   a 360px screen, the reference field keeps its submit button above the
+   keyboard. See RECIPE.md §7 for the rules that are not visible here.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── The scope root ──
+   Put `bd-pay` on the element that holds the picker section, on the popup's
+   root and on the sticky bar (the variants do this for you). The font is
+   Anek Bangla — load it once on the page (a <link> to Google Fonts, or
+   self-host it as production does); the fallbacks keep the layout close but
+   not identical. */
+.bd-pay {
+    --glass-bg: rgba(255, 255, 255, 0.45);
+    --glass-border: rgba(255, 255, 255, 0.7);
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.04);
+    --divider: rgba(255, 255, 255, 0.6);
+
+    --text-primary: #1d1d1f;
+    --text-secondary: #86868b;
+
+    --blue: #007aff;
+    --purple: #5e5ce6;
+    --green: #34c759;
+    --orange: #ff9500;
+    --pink: #ff2d55;
+    --teal: #32ade6;
+    --yellow: #ffcc00;
+    --gray: #8e8e93;
+
+    font-family: 'Anek Bangla', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    color: var(--text-primary);
+    box-sizing: border-box;
+}
+
+.bd-pay *, .bd-pay *::before, .bd-pay *::after { box-sizing: border-box; }
+.bd-pay button { -webkit-tap-highlight-color: transparent; }
+
+/* ── Inline icons ──
+   Every icon is an inline SVG inside an <i class="fa-icon">: the SVG takes
+   its size from the font size (1em) and its colour from `color`, which is
+   what lets one CSS rule size the icon and its text together. */
+
+.bd-pay i.fa-icon { display: inline-flex; align-items: center; justify-content: center; line-height: 1; vertical-align: -0.125em; }
+.bd-pay i.fa-icon > svg { display: block; flex: none; }
+
+/* ── Section heading (the flowing lines and the pill) ── */
+.bd-pay .dynamic-header {
+    display: flex;
+    align-items: center;
+    margin: 3.5rem 0 1.8rem 0;
+    gap: 1rem;
+    width: 100%;
+}
+
+.bd-pay .header-line {
+    flex-grow: 1;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 50px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.bd-pay .header-line.flow-1::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, #007aff, #5e5ce6, transparent);
+    animation: bdpLineFlow 2.5s infinite linear;
+}
+@keyframes bdpLineFlow {
+    0% { left: -100%; }
+    100% { left: 100%; }
+}
+
+.bd-pay .header-content {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.7));
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    padding: 0.6rem 1.6rem;
+    border-radius: 50px;
+    border: 1px solid rgba(255, 255, 255, 1);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08), inset 0 2px 5px rgba(255, 255, 255, 1);
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    z-index: 2;
+    white-space: nowrap;
+}
+
+.bd-pay .header-icon-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.04);
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(255, 255, 255, 1);
+    font-size: 1.1rem;
+}
+.bd-pay .gradient-text-3 {
+    background: linear-gradient(135deg, #16a085, #32ade6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.bd-pay .icon-grad-3 { color: #16a085; }
+
+/* ── The glass card the picker lives in ── */
+.bd-pay .glass-list {
+    background: rgba(255, 255, 255, 0.35);
+    backdrop-filter: blur(30px) saturate(150%);
+    -webkit-backdrop-filter: blur(30px) saturate(150%);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    border-radius: 24px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    margin-bottom: 2.5rem;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── The sticky CTA bar ── */
+.bd-pay .sticky-cta {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    display: flex;
+    justify-content: center;
+    padding: 30px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(to top, rgba(245, 245, 247, 0.98) 0%, rgba(245, 245, 247, 0.85) 55%, transparent 100%);
+    pointer-events: none;
+}
+
+.bd-pay .sticky-cta-btn {
+    pointer-events: auto;
+    width: 100%;
+    max-width: 560px;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 16px 24px;
+    border-radius: 50px;
+    background: linear-gradient(135deg, #007aff 0%, #5e5ce6 55%, #8b5cf6 100%);
+    color: #fff;
+    box-shadow: 0 12px 35px rgba(0, 122, 255, 0.45), 0 4px 12px rgba(94, 92, 230, 0.35), inset 0 2px 2px rgba(255, 255, 255, 0.45), inset 0 -3px 6px rgba(0, 0, 0, 0.12);
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    animation: bdpCtaPulse 2.5s infinite ease-in-out;
+}
+
+@keyframes bdpCtaPulse {
+    0%, 100% { box-shadow: 0 12px 35px rgba(0, 122, 255, 0.45), 0 4px 12px rgba(94, 92, 230, 0.35), inset 0 2px 2px rgba(255, 255, 255, 0.45), inset 0 -3px 6px rgba(0, 0, 0, 0.12); }
+    50% { box-shadow: 0 12px 48px rgba(0, 122, 255, 0.68), 0 4px 20px rgba(94, 92, 230, 0.55), inset 0 2px 2px rgba(255, 255, 255, 0.45), inset 0 -3px 6px rgba(0, 0, 0, 0.12); }
+}
+
+.bd-pay .sticky-cta-btn:hover { transform: translateY(-3px) scale(1.01); }
+.bd-pay .sticky-cta-btn:active { transform: scale(0.98); }
+
+.bd-pay .cta-shine {
+    position: absolute;
+    top: 0;
+    left: -80%;
+    width: 50%;
+    height: 100%;
+    background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+    transform: skewX(-20deg);
+    animation: bdpCtaShine 3s infinite;
+    pointer-events: none;
+}
+
+@keyframes bdpCtaShine {
+    0% { left: -80%; }
+    60% { left: 130%; }
+    100% { left: 130%; }
+}
+
+.bd-pay .cta-label {
+    font-size: 1.3rem;
+    font-weight: 800;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.bd-pay .cta-arrow {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.35);
+    animation: bdpArrowNudge 1.4s infinite ease-in-out;
+}
+
+@keyframes bdpArrowNudge {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(5px); }
+}
+
+/* ── Payment Method Selection Section ── */
+/* ── Name + phone, above the payment methods ──────────────────────────
+   The label starts inside the box as the placeholder and rides up onto the
+   border once the field has focus or a value — so the field needs no caption
+
+   above it, and the section keeps its own heading. */
+.bd-pay .lead-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    padding: 1.4rem 1.2rem 0;
+}
+
+.bd-pay .lead-field {
+    position: relative;
+}
+
+/* Required, and said so — an asterisk costs a character and saves the tap
+   that discovers the rule the hard way. */
+.bd-pay .lead-req { color: #e11d48; font-weight: 700; }
+
+.bd-pay .lead-input.invalid {
+    border-color: #e11d48;
+    background: #fff5f6;
+}
+
+.bd-pay .lead-input.invalid:focus {
+    border-color: #e11d48;
+    box-shadow: 0 0 0 4px rgba(225, 29, 72, 0.12);
+}
+
+.bd-pay .lead-error {
+    margin: 6px 2px 0;
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.35;
+    color: #e11d48;
+}
+
+
+.bd-pay .lead-input {
+    /* Where a focus-scroll puts this field: 15% down the screen, label and
+       all, above any keyboard — well inside the band keyboard-aware.js treats
+       as safe (its own reveal stops at the foot of that band, 40%), so the
+       kit leaves it alone. vh, never dvh (see the popup). */
+    scroll-margin-top: 15vh;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 14px 14px 14px 44px;
+    /* A field has to look like one before anyone taps it. A pale border on a
+       pale fill vanished into the lavender card behind it, and the box read
+       as a stripe of background rather than a place to type — so: white, a
+       purple-tinted border that shows against the card, and the same soft
+       lift the method cards below already carry. */
+    border: 2px solid rgba(94, 92, 230, 0.32);
+    border-radius: 14px;
+    font-size: 1.02rem;
+    font-weight: 600;
+    font-family: inherit;
+    color: #1e1b3a;
+    background: #fff;
+    box-shadow: 0 4px 14px rgba(94, 92, 230, 0.08), inset 0 1px 0 #fff;
+    outline: none;
+    transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* The real placeholder is hidden — the <label> plays that part, so it can
+   animate between the two positions instead of blinking out of existence. */
+.bd-pay .lead-input::placeholder { color: transparent; }
+
+.bd-pay .lead-input:focus,
+.bd-pay .lead-input:not(:placeholder-shown) {
+    background: #fff;
+    border-color: var(--purple);
+}
+
+.bd-pay .lead-input:focus {
+    box-shadow: 0 0 0 4px rgba(94, 92, 230, 0.12), 0 4px 14px rgba(94, 92, 230, 0.08);
+}
+
+.bd-pay .lead-field label {
+    position: absolute;
+    left: 40px;
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 0 6px;
+    font-size: 1.02rem;
+    font-weight: 600;
+    /* Deep enough to read as the field's name, not a watermark — a shade
+       lighter than typed text so the two are still told apart. */
+    color: #3b3763;
+    background: transparent;
+    pointer-events: none;
+    white-space: nowrap;
+    transition: top 0.18s ease, left 0.18s ease, font-size 0.18s ease, color 0.18s ease;
+}
+
+/* Floated: sitting ON the border, cutting a notch out of it */
+.bd-pay .lead-input:focus + label,
+.bd-pay .lead-input:not(:placeholder-shown) + label {
+    top: 0;
+    left: 34px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--purple);
+    background: #fff;
+}
+
+.bd-pay .lead-field i {
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.95rem;
+    color: #7c76a8;
+    pointer-events: none;
+    transition: color 0.2s ease;
+}
+
+.bd-pay .lead-input:focus ~ i,
+.bd-pay .lead-input:not(:placeholder-shown) ~ i { color: var(--purple); }
+
+/* One row, always. auto-fit with a minimum width wrapped the fourth method
+   onto its own line as soon as the phone was narrow enough — bank sitting
+   alone under the three wallets read as a separate, lesser option rather than
+   a fourth equal choice. Column flow with equal auto-columns puts however many
+   methods there are (three without a bank account, four with) side by side and
+   lets them share whatever width the phone has. */
+.bd-pay .pay-method-grid {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 0.9rem;
+    padding: 1.4rem 1.2rem;
+}
+
+.bd-pay .pay-method-card {
+    position: relative;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.65) 100%);
+    border: 2px solid rgba(255, 255, 255, 0.9);
+    border-radius: 18px;
+    padding: 1.1rem 0.5rem 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.55rem;
+    cursor: pointer;
+    font-family: inherit;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.05), inset 0 2px 0 rgba(255, 255, 255, 1);
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.bd-pay .pay-method-card:hover {
+    transform: translateY(-5px) scale(1.03);
+    border-color: var(--pm-color);
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.12);
+    background: #fff;
+}
+
+.bd-pay .pay-method-card:active { transform: scale(0.96); }
+
+/* Selected method: enlarged with brand ring so it clearly stands out */
+.bd-pay .pay-method-card.selected {
+    transform: translateY(-6px) scale(1.09);
+    border-color: var(--pm-color);
+    background: #fff;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.15), 0 0 0 4px var(--pm-soft);
+    z-index: 2;
+}
+
+.bd-pay .pay-method-card.selected:hover {
+    transform: translateY(-6px) scale(1.09);
+}
+
+.bd-pay .pay-method-card.selected .pay-method-name {
+    color: var(--pm-color);
+}
+
+.bd-pay .pay-method-check {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--pm-color);
+    color: #fff;
+    font-size: 0.68rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.22);
+    animation: bdpPopIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.bd-pay .pay-method-logo {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    background: var(--pm-soft);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 7px;
+    box-sizing: border-box;
+}
+
+.bd-pay .pay-method-logo img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+/* Bank has no logo to license — it gets the same tile, drawn in-house. */
+.bd-pay .pay-method-logo.bank {
+    background: linear-gradient(135deg, #2563eb, #1e40af);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    padding: 0;
+}
+
+.bd-pay .pay-method-logo.bank svg {
+    width: 26px;
+    height: 26px;
+    color: #fff;
+}
+
+.bd-pay .pay-method-name {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: #1d1d1f;
+}
+
+
+/* Payment-done state card */
+.bd-pay .pay-done-card {
+    align-items: center;
+    text-align: center;
+    padding: 1.8rem 1.4rem;
+    gap: 0.4rem;
+    background: rgba(240, 253, 244, 0.75);
+    border-color: rgba(16, 185, 129, 0.35);
+}
+
+.bd-pay .pay-done-icon {
+    font-size: 3rem;
+    color: #10b981;
+    filter: drop-shadow(0 6px 15px rgba(16, 185, 129, 0.35));
+    margin-bottom: 0.3rem;
+}
+
+.bd-pay .pay-done-title {
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: #065f46;
+}
+
+.bd-pay .pay-done-sub {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #334155;
+    margin-bottom: 0.8rem;
+}
+
+.bd-pay .pay-done-btn {
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: #fff;
+    padding: 13px 28px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    box-shadow: 0 10px 25px rgba(16, 185, 129, 0.4);
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.bd-pay .pay-done-btn:hover { transform: translateY(-2px) scale(1.02); }
+
+.bd-pay .pay-done-reset {
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #64748b;
+    margin-top: 0.6rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.bd-pay .pay-done-reset:hover { color: #0f172a; text-decoration: underline; }
+
+/* ── Branded Payment Popup ── */
+.bd-pay .pay-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 300;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(15, 16, 33, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    animation: bdpFadeIn 0.25s ease;
+}
+
+@keyframes bdpFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.bd-pay .pay-modal {
+    /* The close confirmation covers this box, so it must be the containing
+       block for it — and it must not scroll, or the confirmation would scroll
+       away with the content underneath. */
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    /* Keeps the scroller's square corners inside the card's radius. */
+    overflow: hidden;
+    width: 100%;
+    max-width: 420px;
+    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
+    background: #fff;
+    border-radius: 26px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
+    animation: bdpPopIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* What actually scrolls inside the card — and the scroller keyboard-aware.js
+   finds when it lifts the reference field clear of the keyboard. */
+.bd-pay .pay-scroll {
+    overflow-y: auto;
+    /* A flex item's min-height defaults to its CONTENT height, which would stop
+       this from ever shrinking inside the card's max-height — the card would
+       clip the submit button off with nothing able to scroll to it. */
+    min-height: 0;
+    /* Reaching the end of this must not rubber-band the page behind the overlay. */
+    overscroll-behavior: contain;
+}
+
+/* ── The popup's half of the soft-keyboard contract ──
+   (the other half is keyboard-aware.js, loaded once on the page)
+
+   The card lives inside a fixed overlay, so the room the kit reserves at the
+   foot of the DOCUMENT cannot reach in here — the overlay has to spend the
+   measurement itself. Shrinking the card to the band the keyboard actually
+   left visible does both jobs at once: the card is fully on screen, and its
+   scroller gains exactly the range needed to bring the reference field — and
+   the submit button under it — above the keyboard.
+
+   Top-aligned while that is true: a card centred in a viewport the browser
+   never shrank is centred behind the keyboard. (On phones the card is
+   top-aligned ALWAYS — see the mobile block — because the host this page
+   sells through, Facebook's browser on current Android, gives the kit no
+   measurement at all: no event and no number. There, nothing below ever
+   fires, and the card's position at rest is the only position it has.)
+
+   Where the browser resizes the page itself (Chrome), keyboard-aware.js
+   measures zero, never sets data-kb, and none of this applies. */
+html[data-kb] .bd-pay .pay-overlay {
+    align-items: flex-start;
+    /* An adjustPan host scrolls the whole page up rather than resizing it, and
+       takes this fixed overlay with it. --kb-top is how far. */
+    padding-top: calc(16px + var(--kb-top, 0px));
+}
+
+html[data-kb] .bd-pay .pay-modal {
+    /* Written in the pixels the kit measured, NOT dvh — and that is the fix.
+       dvh landed in Chrome 108; Facebook's in-app browser on the phones this
+       page actually sells to is often older, and a browser that does not know
+       a unit discards the entire declaration. The card then kept the base
+       rule's full height and sat behind the keyboard while the kit's correct
+       measurement went unspent — that was the "I can't see the number I'm
+       typing" bug.
+       100vh is the fallback for a page where the kit never ran at all. */
+    max-height: calc(var(--kb-vh, 100vh) - 32px);
+}
+
+/* ── Close confirmation ──
+   A stray tap on ✕ must not throw away a half-typed sender number for money
+   the buyer has already sent. */
+.bd-pay .pay-confirm {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    background: rgba(255, 255, 255, 0.96);
+    border-radius: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    animation: bdpFadeIn 0.2s ease;
+}
+
+.bd-pay .pay-confirm-box {
+    text-align: center;
+    max-width: 300px;
+}
+
+.bd-pay .pay-confirm-ttl {
+    margin: 0 0 8px;
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+
+.bd-pay .pay-confirm-msg {
+    margin: 0 0 16px;
+    font-size: 0.92rem;
+    font-weight: 500;
+    line-height: 1.5;
+    color: #475569;
+}
+
+.bd-pay .pay-confirm-row {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
+.bd-pay .pay-confirm-yes,
+.bd-pay .pay-confirm-no {
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-family: inherit;
+    font-size: 0.92rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: filter 0.2s ease;
+}
+
+.bd-pay .pay-confirm-yes {
+    border: none;
+    background: #ef4444;
+    color: #fff;
+}
+
+.bd-pay .pay-confirm-no {
+    border: 1px solid #cbd5e1;
+    background: #f1f5f9;
+    color: #334155;
+}
+
+.bd-pay .pay-confirm-yes:hover,
+.bd-pay .pay-confirm-no:hover { filter: brightness(0.96); }
+
+@keyframes bdpPopIn {
+    from { opacity: 0; transform: translateY(30px) scale(0.96); }
+    to { opacity: 1; transform: none; }
+}
+
+.bd-pay .pay-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 16px;
+    background: var(--pm-color);
+    color: #fff;
+    position: relative;
+    border-radius: 26px 26px 0 0;
+}
+
+/* Small, subtle close button — top-right of the popup header */
+.bd-pay .pay-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.14);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 0.75rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    z-index: 3;
+}
+
+.bd-pay .pay-close:hover {
+    background: rgba(255, 255, 255, 0.28);
+    color: #fff;
+}
+
+.bd-pay .pay-switch {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.bd-pay .pay-switch-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 4px;
+    border: 2px solid #e2e8f0;
+    border-radius: 11px;
+    background: #fff;
+    font-family: inherit;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #64748b;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.bd-pay .pay-switch-btn img {
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+}
+
+.bd-pay .pay-switch-btn.active {
+    border-color: var(--pm-color);
+    color: var(--pm-color);
+    background: var(--pm-soft);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.bd-pay .pay-switch-btn:active { transform: scale(0.96); }
+
+.bd-pay .pay-logo-box {
+    width: 44px;
+    height: 44px;
+    border-radius: 13px;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.15);
+}
+
+.bd-pay .pay-logo-box img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.bd-pay .pay-logo-box.bank {
+    background: linear-gradient(135deg, #2563eb, #1e40af);
+    padding: 0;
+}
+
+.bd-pay .pay-logo-box.bank svg {
+    width: 24px;
+    height: 24px;
+    color: #fff;
+}
+
+.bd-pay .pay-header-text { min-width: 0; padding-right: 24px; }
+
+.bd-pay .pay-title {
+    font-size: 1.18rem;
+    font-weight: 800;
+    line-height: 1.3;
+}
+
+.bd-pay .pay-title span {
+    font-size: 0.9rem;
+    font-weight: 600;
+    opacity: 0.9;
+}
+
+.bd-pay .pay-body { padding: 12px 16px 16px; }
+
+.bd-pay .pay-amount-box {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--pm-soft);
+    border-radius: 14px;
+    padding: 9px 12px;
+}
+
+.bd-pay .pay-amount-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: #fff;
+    color: var(--pm-color);
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
+}
+
+.bd-pay .pay-amount-label {
+    font-size: 1.02rem;
+    font-weight: 700;
+    color: #1d1d1f;
+}
+
+.bd-pay .pay-amount {
+    margin-left: auto;
+    font-size: 1.5rem;
+    font-weight: 900;
+    color: var(--pm-color);
+    line-height: 1;
+}
+
+.bd-pay .pay-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #334155;
+    margin: 11px 0 6px;
+}
+
+.bd-pay .pay-label i { color: var(--pm-color); font-size: 0.85rem; }
+
+.bd-pay .pay-number-box {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    border: 2px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 6px 6px 6px 14px;
+}
+
+.bd-pay .pay-number {
+    font-size: 1.25rem;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    color: #0f172a;
+    white-space: nowrap;
+}
+
+.bd-pay .pay-copy-btn {
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #fff;
+    background: var(--pm-color);
+    border-radius: 10px;
+    padding: 9px 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.bd-pay .pay-copy-btn:active { transform: scale(0.95); }
+
+/* ── Bank account details ──
+   A wallet is one number with a copy button beside it. A bank account is five
+   rows, and copying them one at a time into a bank app is where a transfer
+   goes wrong — so the rows are read-only and the copy button under them hands
+   over the whole set, labels included. */
+.bd-pay .pay-bank {
+    background: #f8fafc;
+    border: 2px solid #e2e8f0;
+    border-radius: 14px;
+    overflow: hidden;
+}
+
+.bd-pay .pay-bank-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 7px 13px;
+}
+
+.bd-pay .pay-bank-row + .pay-bank-row { border-top: 1px solid #e2e8f0; }
+
+.bd-pay .pay-bank-lbl {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #64748b;
+    flex-shrink: 0;
+}
+
+.bd-pay .pay-bank-val {
+    font-size: 0.92rem;
+    font-weight: 800;
+    color: #1e293b;
+    text-align: right;
+    /* An account number has no spaces to break at, and a long one must wrap
+       rather than push the copy button off the card. */
+    word-break: break-all;
+    min-width: 0;
+}
+
+.bd-pay .pay-bank-val.mono {
+    font-size: 1rem;
+    letter-spacing: 0.5px;
+}
+
+.bd-pay .pay-copy-all {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 10px;
+    border: none;
+    border-top: 1px solid #e2e8f0;
+    background: var(--pm-soft);
+    color: var(--pm-color);
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.bd-pay .pay-copy-all:hover {
+    background: var(--pm-color);
+    color: #fff;
+}
+
+.bd-pay .pay-copy-all.copied {
+    background: #10b981;
+    color: #fff;
+}
+
+.bd-pay .pay-copy-all:active { transform: scale(0.98); }
+
+.bd-pay .pay-steps {
+    background: #f8fafc;
+    border-left: 4px solid var(--pm-color);
+    border-radius: 12px;
+    padding: 9px 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.bd-pay .pay-step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: #1e293b;
+}
+
+.bd-pay .pay-step-num {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--pm-color);
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.bd-pay .pay-input {
+    /* "When you reveal me, reveal what sits under me too." Under this field
+       are the error line and the submit button — typing with the one control
+       you need hidden behind the keyboard is most of what "the popup doesn't
+       work in Facebook" means in practice. Chrome honours this in its own
+       focus scroll; keyboard-aware.js honours it in the hosts that do not.
+       112px, not the kit's 72px: this popup's error row sits between the two. */
+    scroll-margin-bottom: 112px;
+    scroll-margin-top: 32px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 11px 14px;
+    border: 2px solid #e2e8f0;
+    border-radius: 13px;
+    font-size: 1.05rem;
+    font-weight: 600;
+    font-family: inherit;
+    color: #0f172a;
+    background: #fff;
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.bd-pay .pay-input::placeholder { color: #94a3b8; font-weight: 500; }
+
+.bd-pay .pay-input:focus {
+    border-color: var(--pm-color);
+    box-shadow: 0 0 0 4px var(--pm-soft);
+}
+
+.bd-pay .pay-error {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #dc2626;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    padding: 8px 12px;
+    border-radius: 11px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-top: 9px;
+}
+
+.bd-pay .pay-submit {
+    width: 100%;
+    margin-top: 13px;
+    padding: 12px;
+    border: none;
+    border-radius: 13px;
+    background: var(--pm-color);
+    color: #fff;
+    font-size: 1.15rem;
+    font-weight: 800;
+    font-family: inherit;
+    cursor: pointer;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+    transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.bd-pay .pay-submit:hover { transform: translateY(-2px); filter: brightness(1.06); }
+.bd-pay .pay-submit:active { transform: scale(0.98); }
+
+/* ── The two steps and the answer ────────────────────────────────────── */
+/* Tailwind's preflight makes every svg display:block; inside a button that
+   would put the icon on a line of its own. The buttons that carry one are
+   flex rows, and the icon is sized to the text. */
+.bd-pay .pay-submit { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.bd-pay .pay-btn-icon { display: inline-block; width: 1.05em; height: 1.05em; flex: none; }
+
+
+/* The answer. One phone screen, no scrolling: the icon sits beside the
+   words, every strip is one line, and the box with the number to send to
+   carries its own title. */
+.bd-pay .pay-check { text-align: left; padding-top: 2px; }
+.bd-pay .pay-check-head { display: flex; align-items: flex-start; gap: 11px; }
+.bd-pay .pay-check-txt { min-width: 0; flex: 1; }
+.bd-pay .pay-check-spin {
+    width: 38px;
+    height: 38px;
+    flex: none;
+    border-radius: 50%;
+    border: 4px solid var(--pm-soft);
+    border-top-color: var(--pm-color);
+    animation: bdpSpin 0.9s linear infinite;
+}
+@keyframes bdpSpin { to { transform: rotate(360deg); } }
+.bd-pay .pay-check-icon {
+    width: 38px;
+    height: 38px;
+    flex: none;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.15rem;
+}
+.bd-pay .pay-check-icon svg { width: 21px; height: 21px; }
+.bd-pay .pay-check.ok .pay-check-icon { background: #dcfce7; color: #15803d; }
+.bd-pay .pay-check.warn .pay-check-icon { background: #fef3c7; color: #b45309; }
+.bd-pay .pay-check.info .pay-check-icon { background: #e0e7ff; color: #4338ca; }
+.bd-pay .pay-check-ttl { font-size: 1.08rem; font-weight: 800; line-height: 1.25; color: #0f172a; }
+.bd-pay .pay-check-sub { margin-top: 3px; font-size: 0.86rem; line-height: 1.45; color: #475569; font-weight: 500; }
+.bd-pay .pay-check-sub strong { color: #0f172a; font-weight: 800; }
+/* The answer is one card, tinted by its kind: the head row on top, and
+   under a hairline a footer row — what is happening now on the left (the
+   live check and its clock, or "try again"), the one correction on the
+   right. Nothing floats in the space beside the words. */
+.bd-pay .pay-check-card {
+    padding: 12px 12px 10px;
+    border-radius: 15px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+.bd-pay .pay-check.ok .pay-check-card { background: #f0fdf4; border-color: #bbf7d0; }
+.bd-pay .pay-check.warn .pay-check-card { background: #fffbeb; border-color: #fde68a; }
+.bd-pay .pay-check.info .pay-check-card { background: #eef2ff; border-color: #c7d2fe; }
+.bd-pay .pay-check-card .pay-check-icon { background: #fff; }
+.bd-pay .pay-check-foot {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px solid rgba(15, 23, 42, 0.08);
+    font-size: 0.8rem;
+    font-weight: 700;
+    line-height: 1.35;
+    color: #475569;
+}
+.bd-pay .pay-check-foot-txt { min-width: 0; }
+.bd-pay .pay-check-foot b { font-variant-numeric: tabular-nums; color: #0f172a; font-weight: 800; }
+.bd-pay .pay-check-foot.ended { color: #92400e; }
+.bd-pay .pay-check-retry {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #fff;
+    border: 1.5px solid currentColor;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font: inherit;
+    font-weight: 800;
+    color: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.bd-pay .pay-check-retry svg { width: 13px; height: 13px; }
+/* "Sent from another number?" — a pill at the row's right edge, in the
+   wallet's colour: a thing to tap, not a link lost inside a sentence. */
+.bd-pay .pay-check-change {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+    padding: 4px 11px 4px 9px;
+    background: #fff;
+    border: 1.5px solid var(--pm-color);
+    border-radius: 999px;
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 800;
+    line-height: 1.35;
+    color: var(--pm-color);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+.bd-pay .pay-check-change svg { width: 13px; height: 13px; }
+.bd-pay .pay-check-change:hover { background: var(--pm-soft); }
+.bd-pay .pay-check-change:active { transform: scale(0.97); }
+.bd-pay .pay-check-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5);
+    animation: bdpPulseDot 1.4s ease-out infinite;
+    flex: none;
+}
+@keyframes bdpPulseDot { to { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); } }
+/* The number to send to, again — inside the answer, for whoever has not. */
+.bd-pay .pay-check-pay {
+    margin-top: 10px;
+    padding: 9px 10px 10px;
+    border-radius: 15px;
+    background: var(--pm-soft);
+    border: 1.5px solid var(--pm-color);
+}
+.bd-pay .pay-check-pay-ttl {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 7px;
+    font-size: 0.9rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+.bd-pay .pay-check-pay-ttl b { flex: none; font-size: 1.05rem; color: var(--pm-color); }
+.bd-pay .pay-check-pay .pay-number-box { background: #fff; padding: 5px 5px 5px 12px; border-radius: 12px; }
+.bd-pay .pay-check-pay .pay-number { font-size: 1.15rem; }
+.bd-pay .pay-check-pay .pay-copy-btn { padding: 8px 12px; font-size: 0.84rem; }
+.bd-pay .pay-check-pay .pay-bank { background: #fff; }
+.bd-pay .pay-check-pay-note {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 7px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #15803d;
+}
+.bd-pay .pay-check-pay-note svg { width: 14px; height: 14px; flex: none; }
+.bd-pay .pay-check .pay-submit { margin-top: 10px; padding: 11px; font-size: 1.05rem; }
+.bd-pay .pay-check .wa-help { margin-top: 10px; font-size: 0.8rem; }
+.bd-pay .pay-alt {
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: none;
+    border: 1.5px dashed #cbd5e1;
+    border-radius: 12px;
+    font: inherit;
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: #475569;
+    cursor: pointer;
+}
+.bd-pay .pay-alt strong { color: var(--pm-color); font-weight: 800; }
+.bd-pay .pay-continue {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: #fff;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 13px;
+    font: inherit;
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: #0f172a;
+    cursor: pointer;
+    line-height: 1.3;
+}
+.bd-pay .pay-continue > span { display: inline-flex; align-items: center; gap: 6px; }
+.bd-pay .pay-continue small { font-size: 0.74rem; font-weight: 600; color: #64748b; margin-top: 1px; }
+
+/* The done card, for a claim the money has not confirmed. */
+.bd-pay .pay-done-icon.waiting { color: #d97706; }
+.bd-pay .pay-done-note {
+    margin: 10px auto 0;
+    max-width: 340px;
+    padding: 9px 12px;
+    border-radius: 12px;
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    color: #92400e;
+    font-size: 0.86rem;
+    font-weight: 600;
+    line-height: 1.5;
+}
+.bd-pay .pay-done-note button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 6px;
+    background: #fff;
+    border: 1.5px solid #f59e0b;
+    border-radius: 9px;
+    padding: 5px 10px;
+    font: inherit;
+    font-weight: 800;
+    color: #92400e;
+    cursor: pointer;
+}
+.bd-pay .pay-done-note button svg { width: 14px; height: 14px; }
+
+/* ── The second door: WhatsApp ────────────────────────────────────────
+   Inside the popup: one line of secondary text with the brand mark in
+   front, under the submit. Deliberately not a button — the popup has one
+   button, and this is the way out for whoever cannot press it. The green
+   is WhatsApp's own so the mark reads at a glance. */
+.bd-pay .wa-help {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 15px;
+    font-size: 0.84rem;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--text-secondary);
+    text-decoration: none;
+    text-align: center;
+}
+
+.bd-pay .wa-help i.fa-icon {
+    flex: none;
+    font-size: 1.25em;
+    color: #25d366;
+}
+
+.bd-pay .wa-help strong {
+    font-weight: 700;
+    color: #128c7e;
+    border-bottom: 1px solid rgba(37, 211, 102, 0.45);
+    transition: border-color 0.2s ease;
+}
+
+.bd-pay .wa-help:hover strong { border-bottom-color: #128c7e; }
+
+
+.bd-pay .wa-bubble {
+    position: fixed;
+    right: 16px;
+    bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+    z-index: 101;
+    width: 54px;
+    height: 54px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #25d366;
+    color: #fff;
+    font-size: 30px;
+    text-decoration: none;
+    box-shadow: 0 8px 24px rgba(37, 211, 102, 0.45), 0 2px 6px rgba(0, 0, 0, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.35);
+    -webkit-tap-highlight-color: transparent;
+    opacity: 0;
+    transform: translateX(calc(100% + 24px));
+    pointer-events: none;
+    transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease, box-shadow 0.2s ease;
+}
+
+.bd-pay .wa-bubble.on {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+}
+
+.bd-pay .wa-bubble.on:hover { transform: scale(1.07); box-shadow: 0 12px 30px rgba(37, 211, 102, 0.55), 0 3px 8px rgba(0, 0, 0, 0.14), inset 0 1px 1px rgba(255, 255, 255, 0.35); }
+.bd-pay .wa-bubble.on:active { transform: scale(0.94); }
+
+@media (prefers-reduced-motion: reduce) {
+    .bd-pay .wa-bubble { transition: opacity 0.2s ease; transform: none; }
+}
+
+/* ── Phones ──
+   The production page keys these on 500px. Everything here is what the
+   popup and the picker need to fit a 360px screen with the keyboard up. */
+@media (max-width: 500px) {
+    .bd-pay .dynamic-header {
+        margin: 2rem 0 1.2rem 0;
+        gap: 0.5rem;
+    }
+
+    .bd-pay .header-content {
+        font-size: 1.05rem;
+        padding: 0.5rem 1.2rem;
+    }
+
+
+    .bd-pay .lead-card { padding: 1.2rem 0.9rem 0; gap: 0.75rem; }
+
+    /* Four across on a 360px screen: the gaps and the card's own padding are
+       what has to give, not the row. */
+    .bd-pay .pay-method-grid { gap: 0.5rem; padding: 1.2rem 0.75rem; }
+
+    .bd-pay .pay-method-card { padding: 0.85rem 0.25rem 0.75rem; gap: 0.4rem; border-radius: 14px; }
+
+    .bd-pay .pay-method-logo { width: 42px; height: 42px; border-radius: 11px; padding: 5px; }
+
+    .bd-pay .pay-method-check { width: 18px; height: 18px; font-size: 0.58rem; top: 5px; right: 5px; }
+
+    /* A ninth of extra size on a card this narrow is what would clip its
+       neighbour; the lift and the ring still mark it clearly enough. */
+    .bd-pay .pay-method-card.selected,
+    .bd-pay .pay-method-card.selected:hover { transform: translateY(-5px) scale(1.04); }
+
+    .bd-pay .pay-method-name { font-size: 0.8rem; }
+
+    /* ── The popup, on one screen ──
+       Bank is the tall one: five account rows where a wallet has a single
+       number, and the submit button fell below the fold behind them. Someone
+       who has just moved money and cannot see where to confirm it assumes the
+       page is broken, so every measurement below is spent buying that button
+       back onto the first screen. Nothing is removed — the routing number and
+       the three steps are the reason the popup exists — only tightened, and
+       only on phones. */
+    .bd-pay .pay-header { padding: 10px 14px; gap: 10px; }
+
+    /* ── Top of the screen, always ──
+       Facebook's in-app browser on current Android draws the keyboard OVER
+       the page and reports nothing — not a resize event, not a changed
+       height, nothing keyboard-aware.js can measure. A card centred in that
+       viewport is centred behind the keyboard, and no rule keyed on a
+       measurement can move it, because there is no measurement. So on phones
+       the card does not wait to be told: it starts at the top, where the
+       keyboard is not, and the only thing that moves when a field is tapped
+       is the content inside it (the kit scrolls the field to the top of the
+       card, before the keyboard has moved). A card that is already where it
+       needs to be has no reason to jump when the keyboard arrives — which is
+       the other half of what this buys. Nearly full-height anyway, the card
+       looks the same at rest; only the empty band moves from above it to
+       below it. */
+    .bd-pay .pay-overlay { align-items: flex-start; }
+
+    .bd-pay .pay-body { padding: 10px 14px 12px; }
+
+    .bd-pay .pay-amount-box { padding: 7px 11px; gap: 10px; }
+
+    .bd-pay .pay-amount-icon { width: 30px; height: 30px; border-radius: 9px; font-size: 0.9rem; }
+
+    .bd-pay .pay-label { font-size: 0.88rem; margin: 8px 0 4px; gap: 6px; }
+
+    .bd-pay .pay-bank-row { padding: 5px 11px; gap: 8px; }
+
+    .bd-pay .pay-bank-lbl { font-size: 0.72rem; }
+
+    .bd-pay .pay-bank-val { font-size: 0.86rem; }
+
+    .bd-pay .pay-steps { padding: 7px 11px; gap: 5px; }
+
+    .bd-pay .pay-step { font-size: 0.85rem; gap: 8px; }
+
+    .bd-pay .pay-step-num { width: 19px; height: 19px; font-size: 0.7rem; }
+
+    .bd-pay .pay-submit { margin-top: 10px; padding: 11px; font-size: 1.05rem; }
+
+    .bd-pay .pay-title { font-size: 1.05rem; }
+
+    .bd-pay .pay-number { font-size: 1.12rem; letter-spacing: 0.3px; }
+
+    .bd-pay .pay-copy-btn { font-size: 0.82rem; padding: 8px 11px; }
+
+    .bd-pay .pay-amount { font-size: 1.35rem; }
+
+    .bd-pay .cta-label { font-size: 1.15rem; }
+
+    .bd-pay .cta-arrow { width: 30px; height: 30px; font-size: 0.85rem; }
+
+    .bd-pay .sticky-cta-btn {
+        padding: 14px 18px;
+        gap: 10px;
+    }
+}

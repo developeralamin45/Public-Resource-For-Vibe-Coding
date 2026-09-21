@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="bn">
+<head>
+    <meta charset="utf-8">
+    <!-- No interactive-widget=resizes-content: deliberate, see RECIPE.md §7. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Send-Money Checkout — demo</title>
+    <!-- The page font. Production self-hosts it; a <link> is the quick way. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Anek+Bangla:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <!-- 1. The stylesheet, shared by both variants. -->
+    <link rel="stylesheet" href="../checkout.css">
+    <style>
+        /* The host page's own look — the production landing page's wash, so
+           the demo renders as the real thing does. Not part of the kit. */
+        body { margin: 0; background: #f5f5f7; font-family: 'Anek Bangla', system-ui, sans-serif; color: #1d1d1f;
+               background-image: radial-gradient(circle at 10% 0%, rgba(94,92,230,.12) 0%, transparent 40%), radial-gradient(circle at 90% 100%, rgba(0,122,255,.12) 0%, transparent 40%); background-attachment: fixed; min-height: 100vh; }
+        .demo-page { max-width: 600px; margin: 0 auto; padding: 1rem 1rem 8.5rem; box-sizing: border-box; }
+        .demo-intro { font-size: .9rem; line-height: 1.6; color: #6e6e73; margin: 1rem 0 0; }
+        .demo-intro code { background: #fff; padding: 1px 6px; border-radius: 6px; font-size: .82em; }
+        @media (max-width: 500px) { .demo-page { padding: 1rem .8rem 8rem; } }
+    </style>
+</head>
+<body>
+<div class="demo-page">
+    <p class="demo-intro">
+        The production checkout, on a demo backend (<code>node server/node/demo-server.js</code>).
+        Pick a method, pay, type a sender number — then play the SmartPay app with the
+        <code>curl</code> in <code>demo-server.js</code> and watch the popup find the money.
+    </p>
+
+    <!-- 2. Where the section renders. The sticky bar and the popup attach to <body>. -->
+    <div id="pay"></div>
+</div>
+
+<!-- 3. The scripts, in this order. -->
+<script src="bd-phone.js"></script>
+<script src="send-money-checkout.js"></script>
+<script src="../keyboard-aware.js"></script>
+
+<script>
+    // Everything the checkout needs from the outside. In a real page the
+    // numbers come from the server (@json in Blade, a settings endpoint…),
+    // never typed into the markup twice.
+    var api = function (path, body) {
+        return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+            .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'সমস্যা হয়েছে, আবার চেষ্টা করুন।'); return j; }); });
+    };
+
+    var checkout = SendMoneyCheckout.mount(document.getElementById('pay'), {
+        amount: 2950,
+        amountTag: 'বার্ষিক',
+        doneSuffix: '• বার্ষিক প্ল্যান',
+        config: {
+            bkash: '01700000000',
+            nagad: '01800000000',
+            rocket: '01900000000',
+            /* Drop `bank` and the bank method disappears everywhere. */
+            bank: { bankName: 'Example Bank PLC', accountName: 'Your Company Ltd.', accountNumber: '1234567890123', branch: 'Gulshan', routingNumber: '123456789' }
+        },
+        assetsBase: '../assets',
+        popupKey: 'annual',
+        support: { whatsapp: '8801700000000', offer: 'Smart Voice Writer-এর বার্ষিক প্ল্যান (২,৯৫০ টাকা)' },
+        onLead: function (lead, stage, extra) { return api('/api/lead', Object.assign({}, lead, { stage: stage }, extra)); },
+        onSubmit: function (claim) { return api('/api/payment-claim', claim); },
+        checkClaim: function (claim) { return api('/api/payment-claim/check', claim); },
+        onSuccess: function (info) {
+            console.log('claim on record → navigate', info);
+            // location.href = '/register';   — or '/thank-you', '/order/123'
+        },
+        onTrack: function (event, params) { console.log('track', event, params); }
+    });
+    window.checkout = checkout;   // for the console: checkout.open('nagad'), checkout.reset()
+</script>
+</body>
+</html>

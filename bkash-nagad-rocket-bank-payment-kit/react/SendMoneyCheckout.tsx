@@ -1,174 +1,222 @@
-import { useEffect, useState } from "react";
-import { SendMoneyPopup, DEFAULT_BRANDS, WALLETS, readSendMoneyDraft } from "./SendMoneyPopup";
-import type {
-  BankDetails, Provider, ProviderBrand, SendMoneyPopupLabels, WalletProvider,
-} from "./SendMoneyPopup";
-
 /**
- * SendMoneyCheckout — the full flow: a method picker (bKash / Nagad / Rocket /
- * Bank, with logos + a "selected" checkmark) plus a pay button that opens the
- * faithful <SendMoneyPopup>. This is the "same to same" experience end-to-end.
+ * SendMoneyCheckout — the whole flow, as the production landing page has it:
  *
- * Use this when you want the whole picker. If you only need the popup (you have
- * your own method selector), import <SendMoneyPopup> directly instead.
+ *   the section heading → name + phone → the four method tiles
+ *   → the sticky pay button at the foot of the screen
+ *   → the popup (SendMoneyPopup) → the done card once a claim is on record
+ *   → the WhatsApp bubble that yields to the form
  *
- * Styling here uses plain inline styles + a tiny scoped stylesheet so it works
- * with OR without Tailwind. Swap freely to match your design system.
+ * Give it the amount, the merchant numbers and the four callbacks; it does
+ * the rest. Load checkout.css once, and keyboard-aware.js once per page.
  */
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { Fa, BankTileIcon } from './icons';
+import { nextOnEnter, blurOnEnter } from './useImeInput';
+import { useSendMoneyCheckout } from './useSendMoneyCheckout';
+import type { CheckoutOptions } from './useSendMoneyCheckout';
+import { SendMoneyPopup, DEFAULT_LOGOS, whatsappUrl, whatsappText } from './SendMoneyPopup';
+import type { SupportOptions } from './SendMoneyPopup';
+import type { PaymentMethod } from './payment';
 
-const toBn = (n: number | string) => String(n).replace(/[0-9]/g, (d) => "০১২৩৪৫৬৭৮৯"[+d]);
-
-const PICKER_CSS = `
-.smc-wrap{max-width:440px;margin:0 auto;font-family:'Anek Bangla','Hind Siliguri',sans-serif;}
-.smc-ttl{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:800;color:#1e293b;margin:0 0 12px;}
-.smc-ttl-bar{width:4px;height:20px;border-radius:3px;background:linear-gradient(180deg,#6366f1,#8b5cf6);}
-/* auto-fit, not a fixed 3: the picker shows three methods when the merchant
-   has no bank account and four when it does, and drops to fewer columns on a
-   narrow phone rather than squeezing every tile. */
-.smc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:12px;}
-.smc-opt{position:relative;border:2px solid #e2e8f0;background:#fff;border-radius:16px;padding:16px 8px 12px;text-align:center;cursor:pointer;transition:all .3s;font-family:inherit;}
-.smc-opt:hover{border-color:#cbd5e1;transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,0,0,.08);}
-.smc-opt.active{border-color:#3b82f6;background:#eff6ff;box-shadow:0 0 0 4px rgba(59,130,246,.15),0 8px 24px rgba(59,130,246,.25);transform:translateY(-4px);}
-.smc-check{position:absolute;top:-8px;right:-8px;width:24px;height:24px;border-radius:50%;background:#3b82f6;color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 10px rgba(59,130,246,.4);}
-.smc-check svg{width:13px;height:13px;}
-.smc-logo{width:48px;height:48px;object-fit:contain;border-radius:12px;margin:0 auto 8px;display:block;transition:transform .3s;}
-/* Bank has no logo to license — it gets the same 48px tile drawn in-house. */
-.smc-logo.bank{display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#2563eb,#1e40af);box-shadow:0 4px 12px rgba(37,99,235,.3);}
-.smc-logo.bank svg{width:26px;height:26px;stroke:#fff;}
-.smc-opt.active .smc-logo{transform:scale(1.05);}
-.smc-name{display:block;font-size:14px;font-weight:800;color:#64748b;}
-.smc-opt.active .smc-name{color:#1d4ed8;}
-.smc-bar{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:20px;padding:15px;border-radius:16px;color:#fff;font-size:17px;font-weight:800;cursor:pointer;border:none;font-family:inherit;background:linear-gradient(90deg,#6366f1,#8b5cf6,#0ea5e9);box-shadow:0 12px 30px rgba(99,102,241,.4);transition:transform .15s;}
-.smc-bar:hover{transform:translateY(-2px);}
-.smc-bar:active{transform:scale(.98);}
-.smc-bar:disabled{opacity:.55;cursor:not-allowed;}
-`;
-
-const CheckIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-);
-const LockIcon = () => (
-  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
-);
-const BankTileIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21h18M4 18h16M6 18v-7M10 18v-7M14 18v-7M18 18v-7M12 3 3 8h18L12 3z" /></svg>
-);
-
-export interface SendMoneyCheckoutProps {
-  amount: number | string;
-  /** Receiver wallet number per provider. A wallet with no number is hidden. */
-  receivers: Partial<Record<WalletProvider, string | null | undefined>>;
-  /** Bank transfer receiver. Omit (or null) and the bank method never shows. */
-  bank?: BankDetails | null;
-  /** Called on submit — wire to YOUR API. Throw new Error(msg) to show a toast. */
-  onSubmit: (provider: Provider, reference: string) => Promise<void> | void;
-  /** Fired after a successful submit (navigate, analytics, etc.). */
-  onSuccess?: (provider: Provider, reference: string) => void;
-  pickerTitle?: string;
-  payButtonLabel?: string; // default: "পেমেন্ট সম্পন্ন করুন ৳{amount}"
-  brands?: Partial<Record<Provider, ProviderBrand>>;
-  popupLabels?: SendMoneyPopupLabels;
-  /** Methods to show, in order. Default: the wallets you gave a number to,
-   *  then bank when `bank` is supplied. */
-  providers?: Provider[];
-  /** Last-used sender number per wallet — prefills for a returning buyer. */
-  senderPrefill?: Partial<Record<WalletProvider, string>>;
-  /**
-   * Namespaces the reopen-after-refresh storage; give each distinct checkout
-   * page its own key (e.g. the order id). Omit to disable persistence.
-   * With it set, a payment interrupted by a refresh — or by the trip to the
-   * wallet app to actually send the money — comes back with the popup, the
-   * method, the amount and the half-typed reference intact.
-   */
-  popupKey?: string;
+export interface SendMoneyCheckoutProps extends CheckoutOptions {
+    /** The heading over the section. `null` hides it (you have your own). */
+    heading?: string | null;
+    /** After "মোট পরিমাণ" in the popup: "বার্ষিক", "প্রিমিয়াম কোর্স"… */
+    amountTag?: string;
+    /** Under the done card's method line: "• বার্ষিক প্ল্যান". */
+    doneSuffix?: string;
+    /** WhatsApp support: the line in the popup, and the floating bubble. Omit → neither. */
+    support?: SupportOptions & { bubble?: boolean };
+    /** The sticky bar at the foot of the screen (default on). Off → drive it through the ref. */
+    stickyCta?: boolean;
+    logos?: Partial<typeof DEFAULT_LOGOS>;
+    /** Extra class on the section (for spacing in your layout). */
+    className?: string;
 }
 
-export function SendMoneyCheckout({
-  amount, receivers, bank, onSubmit, onSuccess,
-  pickerTitle = "পেমেন্ট মেথড বেছে নিন",
-  payButtonLabel,
-  brands,
-  popupLabels,
-  providers,
-  senderPrefill,
-  popupKey,
-}: SendMoneyCheckoutProps) {
-  const brandMap = brands ? { ...DEFAULT_BRANDS, ...brands } : DEFAULT_BRANDS;
-
-  // Offer only what the merchant can actually receive on.
-  const available: Provider[] = providers ?? [
-    ...WALLETS.filter((w) => !!receivers[w]),
-    ...(bank ? (["bank"] as Provider[]) : []),
-  ];
-
-  const [method, setMethod] = useState<Provider>(available[0] ?? "bkash");
-  const [open, setOpen] = useState(false);
-  const [restoredRef, setRestoredRef] = useState("");
-
-  /* Reopen an in-progress payment. The buyer who left for the bKash app and
-     came back to a remounted page has already sent the money — losing the
-     popup here means losing the claim. */
-  useEffect(() => {
-    if (!popupKey) return;
-    const draft = readSendMoneyDraft(popupKey);
-    if (!draft || !available.includes(draft.provider)) return;
-    setMethod(draft.provider);
-    setRestoredRef(draft.reference);
-    setOpen(true);
-    // Restore once, on mount — a later re-render must not reopen a popup the
-    // buyer has since closed.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [popupKey]);
-
-  const canPay = method === "bank" ? !!bank : !!receivers[method as WalletProvider];
-  const payLabel = payButtonLabel ?? `পেমেন্ট সম্পন্ন করুন ৳${toBn(amount)}`;
-
-  return (
-    <div className="smc-wrap">
-      <style>{PICKER_CSS}</style>
-
-      <p className="smc-ttl"><span className="smc-ttl-bar" /> {pickerTitle}</p>
-      <div className="smc-grid">
-        {available.map((key) => {
-          const active = method === key;
-          const brand = brandMap[key];
-          return (
-            <button key={key} type="button" className={`smc-opt${active ? " active" : ""}`} onClick={() => setMethod(key)}>
-              {active && <span className="smc-check"><CheckIcon /></span>}
-              {key === "bank"
-                ? <span className="smc-logo bank"><BankTileIcon /></span>
-                : <img src={brand.logo} alt={brand.en} className="smc-logo" />}
-              <span className="smc-name">{brand.en}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <button type="button" className="smc-bar" disabled={!canPay} onClick={() => canPay && setOpen(true)}>
-        <LockIcon /> {payLabel}
-      </button>
-
-      {open && canPay && (
-        <SendMoneyPopup
-          provider={method}
-          amount={amount}
-          receivers={receivers}
-          bank={bank}
-          brands={brands}
-          labels={popupLabels}
-          senderPrefill={senderPrefill}
-          initialReference={restoredRef}
-          popupKey={popupKey}
-          onSubmit={onSubmit}
-          onSuccess={onSuccess}
-          /* The customer switched wallet inside the popup — keep the picker
-             behind it in step, so closing does not snap back to the old one. */
-          onSwitch={(next) => { setMethod(next); setRestoredRef(""); }}
-          onClose={() => { setOpen(false); setRestoredRef(""); }}
-        />
-      )}
-    </div>
-  );
+export interface SendMoneyCheckoutHandle {
+    /** What the sticky button does: name and number first, then the popup for the selected method. */
+    pay: () => void;
+    /** Open the popup for a method directly (the lead form is skipped). */
+    open: (method: PaymentMethod) => void;
+    /** Forget a claim on record (the done card's own link does the same). */
+    reset: () => void;
 }
 
-export default SendMoneyCheckout;
+export const SendMoneyCheckout = forwardRef<SendMoneyCheckoutHandle, SendMoneyCheckoutProps>(function SendMoneyCheckout(props, ref) {
+    const { heading, amountTag, doneSuffix, support, stickyCta = true, logos, className, ...options } = props;
+    const c = useSendMoneyCheckout(options);
+    const L = c.labels;
+    const logoOf = (key: 'bkash' | 'nagad' | 'rocket') => (logos && logos[key]) || DEFAULT_LOGOS[key];
+
+    useImperativeHandle(ref, () => ({ pay: c.cta, open: c.openPopup, reset: c.reset }));
+
+    // ── The second door: WhatsApp ──
+    // Some of the people this page is for will not put a name and a number
+    // into a form and send money to a stranger's bKash — but they will ask a
+    // person. The bubble floats above the sticky CTA the whole way down the
+    // page and yields to the form: scrolled down to the fields, the page is
+    // asking for exactly one thing, and a second green button beside that
+    // ask is a second question. So it slides out as this section reaches
+    // the upper half of the screen, and back in when they scroll up. It
+    // also waits 1.2 s after first paint so it is not part of the first
+    // impression.
+    const bubbleWanted = !!support && support.bubble !== false;
+    const [bubbleOn, setBubbleOn] = useState(false);
+    const sectionRef = useRef<HTMLElement>(null);
+    useEffect(() => {
+        if (!bubbleWanted) return;
+        let settled = false;
+        let inView = false;
+        const apply = () => setBubbleOn(settled && !inView);
+        const timer = window.setTimeout(() => { settled = true; apply(); }, 1200);
+        if (typeof IntersectionObserver === 'undefined' || !sectionRef.current) return () => clearTimeout(timer);
+        const io = new IntersectionObserver(entries => {
+            for (const e of entries) inView = e.isIntersecting;
+            apply();
+        }, { rootMargin: '0px 0px -45% 0px' }); // the top 55% of the viewport
+        io.observe(sectionRef.current);
+        return () => { clearTimeout(timer); io.disconnect(); };
+    }, [bubbleWanted]);
+
+    return (
+        <>
+            <section className={`bd-pay${className ? ` ${className}` : ''}`} ref={sectionRef}>
+                {heading !== null && (
+                    <div className="dynamic-header">
+                        <div className="header-line flow-1"></div>
+                        <div className="header-content">
+                            <div className="header-icon-wrapper"><Fa icon="credit-card" className="icon-grad-3" /></div>
+                            <span className="gradient-text-3">{heading ?? L.heading}</span>
+                        </div>
+                        <div className="header-line flow-1"></div>
+                    </div>
+                )}
+
+                {c.done && c.donePm ? (
+                    <div className="glass-list pay-done-card">
+                        <div className={`pay-done-icon${c.done.verified ? '' : ' waiting'}`}><Fa icon={c.done.verified ? 'circle-check' : 'circle-exclamation'} /></div>
+                        <div className="pay-done-title">{c.done.verified ? L.doneVerifiedTitle : L.doneTitle}</div>
+                        <div className="pay-done-sub">
+                            {c.donePm.bn} • <strong>{c.done.reference}</strong>
+                            {doneSuffix && <> {doneSuffix}</>}
+                        </div>
+                        {/* A claim the money has not confirmed says so — a card that
+                            reads "done" to someone who sent nothing is a lie. */}
+                        {!c.done.verified && (
+                            <div className="pay-done-note">
+                                {L.doneNote}
+                                <button type="button" data-act="recheck" onClick={c.recheckDone}><Fa icon="search" /> {L.doneRecheck}</button>
+                            </div>
+                        )}
+                        <button type="button" className="pay-done-btn" data-act="success" onClick={() => c.onSuccess(c.done!)}>
+                            {L.doneButton} <Fa icon="arrow-right" />
+                        </button>
+                        <button type="button" className="pay-done-reset" data-act="reset" onClick={c.reset}>
+                            <Fa icon="rotate-left" /> {L.doneReset}
+                        </button>
+                    </div>
+                ) : (
+                    <div className="glass-list">
+                        {/* Name + number, above the methods. The label rides up out
+                            of the box once there is a value in it, so the field
+                            explains itself without a caption sitting above it. */}
+                        {c.askLead && (
+                            <div className="lead-card">
+                                <div className="lead-field">
+                                    <input
+                                        id="bdpay-lead-name"
+                                        className={`lead-input${c.leadError === 'name' ? ' invalid' : ''}`}
+                                        type="text"
+                                        value={c.leadName}
+                                        onChange={e => c.onLeadNameChange(e.target.value)}
+                                        placeholder={L.leadName}
+                                        autoComplete="name"
+                                        enterKeyHint="next"
+                                        onKeyDown={nextOnEnter('bdpay-lead-phone')}
+                                        maxLength={60}
+                                        required
+                                        aria-invalid={c.leadError === 'name'}
+                                    />
+                                    <label htmlFor="bdpay-lead-name">{L.leadName} <span className="lead-req">*</span></label>
+                                    <Fa icon="user" />
+                                    {c.leadError === 'name' && <p className="lead-error">{L.leadNameError}</p>}
+                                </div>
+                                <div className="lead-field">
+                                    <input
+                                        id="bdpay-lead-phone"
+                                        className={`lead-input${c.leadError === 'phone' ? ' invalid' : ''}`}
+                                        type="tel"
+                                        inputMode="numeric"
+                                        value={c.leadPhone}
+                                        {...c.leadPhoneIme}
+                                        placeholder={L.leadPhone}
+                                        autoComplete="tel"
+                                        enterKeyHint="done"
+                                        onKeyDown={blurOnEnter}
+                                        required
+                                        aria-invalid={c.leadError === 'phone'}
+                                    />
+                                    <label htmlFor="bdpay-lead-phone">{L.leadPhone} <span className="lead-req">*</span></label>
+                                    <Fa icon="phone" />
+                                    {c.leadError === 'phone' && <p className="lead-error">{L.leadPhoneError}</p>}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="pay-method-grid">
+                            {c.methods.map(pm => {
+                                const isSelected = c.selectedMethod === pm.key;
+                                return (
+                                    <button key={pm.key} type="button"
+                                        className={`pay-method-card${isSelected ? ' selected' : ''}`}
+                                        data-method={pm.key}
+                                        style={{ '--pm-color': pm.color, '--pm-soft': pm.soft } as React.CSSProperties}
+                                        onClick={() => c.setSelectedMethod(pm.key)}>
+                                        {isSelected && (
+                                            <span className="pay-method-check"><Fa icon="check" /></span>
+                                        )}
+                                        <div className={`pay-method-logo${pm.key === 'bank' ? ' bank' : ''}`}>
+                                            {pm.key === 'bank' ? <BankTileIcon /> : <img src={logoOf(pm.key)} alt={pm.label} />}
+                                        </div>
+                                        <span className="pay-method-name">{pm.bn}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+            </section>
+
+            {/* Sticky Bottom CTA */}
+            {stickyCta && (
+                <div className="bd-pay">
+                    <div className="sticky-cta">
+                        <button type="button" className="sticky-cta-btn" onClick={c.cta}>
+                            <span className="cta-shine"></span>
+                            <span className="cta-label">
+                                {c.done ? L.ctaDone : L.ctaPay(c.amount)}
+                            </span>
+                            <span className="cta-arrow"><Fa icon="arrow-right" /></span>
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Floating WhatsApp bubble. Gone while the popup is open: the popup
+                has its own line, and a bubble over a modal is a bubble over the
+                wrong thing. */}
+            {bubbleWanted && !c.payUi && support && (
+                <div className="bd-pay">
+                    <a className={`wa-bubble${bubbleOn ? ' on' : ''}`} href={whatsappUrl(support.whatsapp, whatsappText(c, support, 'bubble'))} target="_blank" rel="noopener noreferrer"
+                        aria-label="WhatsApp-এ জিজ্ঞেস করুন" title="WhatsApp-এ জিজ্ঞেস করুন"
+                        onClick={() => c.whatsappTap('bubble')}>
+                        <Fa icon="whatsapp" />
+                    </a>
+                </div>
+            )}
+
+            <SendMoneyPopup checkout={c} amountTag={amountTag} support={support} logos={logos} />
+        </>
+    );
+});

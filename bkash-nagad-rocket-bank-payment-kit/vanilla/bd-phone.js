@@ -1,65 +1,77 @@
-/* Bangladeshi phone input smart-normalizer.
-   Framework-agnostic. Include once per page, BEFORE send-money-popup's script.
-   Binds every input[data-bd-phone] (paste or type):
-     • Bengali digits → Latin (০১৭… → 017…)
-     • strips +, hyphens, spaces, anything non-digit
-     • +880/880 country prefix → leading 0, "17…" (10 digits) → "017…"
-     • caps at 11 digits
-   Also exposes window.bdPhoneNormalize(raw) and window.bdPhoneValid(raw) for
-   custom inputs (the checkout popup, whose field is a phone only for
-   bKash/Nagad; submit-time guards on checkout forms).
-
-   The rule is deliberately loose about the operator prefix — 11 digits
-   starting 01, nothing said about the third digit. Operators reshuffle their
-   ranges, so a hardcoded 013–019 list starts rejecting real customers the day
-   a new range opens. If your server validates too (it should), keep the two
-   rules identical. */
+/* bd-phone.js — Bangladeshi phone numbers, typed by real people.
+ *
+ * People do not type "01712345678". They type "০১৭১২৩৪৫৬৭৮" on a Bangla
+ * keyboard, "+880 1712-345678" copied from a contact card, "01712 345 678"
+ * with spaces, or paste a number with a stray dari (।) or comma on the end.
+ * All of those are the SAME number. Fold everything to one canonical shape —
+ * `01XXXXXXXXX` — and refuse only what genuinely cannot be a BD mobile number.
+ *
+ * Same rules as react/bdPhone.ts and server/node/smartpay-rules.js: a number
+ * the browser accepts and the server rejects is a payment nobody can match.
+ *
+ * Exposes window.BdPhone = { toAsciiDigits, toBanglaDigits, sanitize,
+ * normalize, isValid, validate, operator, formatTaka }.
+ */
 (function () {
-    var BN = { '০':'0','১':'1','২':'2','৩':'3','৪':'4','৫':'5','৬':'6','৭':'7','৮':'8','৯':'9' };
-    var BD_MOBILE = /^01\d{9}$/;
-
-    function normalize(raw) {
-        var digits = String(raw || '')
-            .replace(/[০-৯]/g, function (d) { return BN[d]; })
-            .replace(/\D+/g, '');
-        if (digits.indexOf('8801') === 0 && digits.length >= 13) digits = '0' + digits.slice(3);
-        if (digits.length === 10 && digits.charAt(0) === '1') digits = '0' + digits;
-        return digits.slice(0, 11);
+    function toAsciiDigits(s) {
+        return String(s).replace(/[০-৯٠-٩۰-۹]/g, function (d) {
+            var c = d.charCodeAt(0);
+            var base = c >= 0x09E6 ? 0x09E6 : c >= 0x06F0 ? 0x06F0 : 0x0660;
+            return String(c - base);
+        });
     }
 
-    window.bdPhoneNormalize = normalize;
-    window.bdPhoneValid = function (raw) { return BD_MOBILE.test(normalize(raw)); };
-
-    function apply(input) {
-        var v = normalize(input.value);
-        if (input.value !== v) input.value = v;
+    function toBanglaDigits(s) {
+        return String(s).replace(/\d/g, function (d) { return '০১২৩৪৫৬৭৮৯'[Number(d)]; });
     }
 
-    document.querySelectorAll('input[data-bd-phone]').forEach(function (input) {
-        // An IME — a Bangla keyboard typing ০১৭…, Gboard's suggestion
-        // buffer, swipe typing — holds the half-finished text in a
-        // composition the browser owns, not in .value yet. Assigning to
-        // .value mid-composition tears that buffer up: the caret snaps to
-        // the end and the IME's next keystroke rebuilds from text it no
-        // longer recognises, so "০১৭" comes out as "০১৭১". Let the
-        // composition finish untouched and normalise the moment it commits.
-        input.addEventListener('compositionstart', function () { input.dataset.imeOpen = '1'; });
-        input.addEventListener('compositionend', function () {
-            delete input.dataset.imeOpen;
-            apply(input);
-        });
-        input.addEventListener('input', function (e) {
-            if (e.isComposing || input.dataset.imeOpen) return;
-            apply(input);
-        });
-        // Facebook's WebView has been seen committing a composition at blur
-        // WITHOUT firing compositionend. Left alone, the stale imeOpen flag
-        // would mute normalization for every keystroke after refocus — and
-        // the field's current value never got its commit-time cleanup either.
-        // Blur ends any composition by definition, so both are safe here.
-        input.addEventListener('blur', function () {
-            delete input.dataset.imeOpen;
-            apply(input);
-        });
-    });
+    /* What the input field holds while typing: digits only, in local form.
+       Idempotent and self-correcting as more digits arrive. */
+    function sanitize(raw) {
+        var d = toAsciiDigits(raw || '').replace(/\D/g, '');
+        if (d.indexOf('00') === 0) d = d.slice(2);                 // 008801712… (IDD prefix)
+        if (d.indexOf('8801') === 0) d = d.slice(2);               // 8801712…  → 01712…
+        else if (d.indexOf('881') === 0) d = '0' + d.slice(2);     // 881712…   → 01712…
+        else if (/^1[3-9]/.test(d)) d = '0' + d;                   // 1712…     → 01712…
+        return d.slice(0, 11);
+    }
+
+    function isValid(phone) { return /^01[3-9]\d{8}$/.test(phone); }
+
+    /* Errors are Bangla, and each one says exactly what is wrong. */
+    function validate(raw) {
+        var phone = sanitize(raw);
+        if (!phone) return { ok: false, error: 'ফোন নম্বর লিখুন।' };
+        if (phone.length >= 2 && phone.indexOf('01') !== 0) {
+            return { ok: false, error: 'ফোন নম্বরটি ০১ দিয়ে শুরু হতে হবে (যেমন: 01712345678)।' };
+        }
+        if (phone.length < 11) return { ok: false, error: 'ফোন নম্বরটি ১১ ডিজিটের হতে হবে — আপনি ' + toBanglaDigits(String(phone.length)) + ' ডিজিট লিখেছেন।' };
+        if (!isValid(phone)) {
+            return { ok: false, error: 'অপারেটর কোডটি সঠিক নয় — নম্বর 013 / 014 / 015 / 016 / 017 / 018 / 019 দিয়ে শুরু হতে হবে।' };
+        }
+        if (/^(\d)\1{7}$/.test(phone.slice(3))) {
+            return { ok: false, error: 'নম্বরটি সঠিক মনে হচ্ছে না — আপনার আসল মোবাইল নম্বরটি দিন।' };
+        }
+        return { ok: true, phone: phone };
+    }
+
+    function operator(phone) {
+        if (!isValid(phone)) return null;
+        return ({
+            '013': 'গ্রামীণফোন', '017': 'গ্রামীণফোন',
+            '014': 'বাংলালিংক', '019': 'বাংলালিংক',
+            '015': 'টেলিটক', '016': 'এয়ারটেল', '018': 'রবি'
+        })[phone.slice(0, 3)] || null;
+    }
+
+    /* ৳ amounts the way the page prints them: Bangla digits, thousands separated. */
+    function formatTaka(amount) {
+        return toBanglaDigits(Math.round(amount).toLocaleString('en-US'));
+    }
+
+    window.BdPhone = {
+        toAsciiDigits: toAsciiDigits, toBanglaDigits: toBanglaDigits,
+        sanitize: sanitize, normalize: sanitize, isValid: isValid, validate: validate,
+        operator: operator, formatTaka: formatTaka
+    };
 })();

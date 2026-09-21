@@ -1,267 +1,331 @@
-# RECIPE — bKash / Nagad / Rocket / Bank Send-Money Checkout
+# RECIPE — bKash / Nagad / Rocket / Bank send-money checkout + auto-verify
 
-> **For the AI agent implementing this in another project.** Read this top to
-> bottom, then adapt to the host project's stack. The goal is a **pixel-faithful
-> copy** of the payment method picker + send-money popup, wired to the host
-> project's own backend. Do **not** redesign the UI — keep it "same to same".
+> **For the AI agent implementing this in another project.** Read it top to
+> bottom before copying a file. The deliverable is the production checkout,
+> **same to same** — every size, colour, word and gesture — plus its server
+> side and the SmartPay auto-verify hookup, fitted to the host project's
+> stack. Do **not** redesign the UI. Do **not** skip the server half: a
+> popup that records a number and verifies nothing is the thing this kit
+> exists to replace.
 
 ---
 
-## 1. What this is
+## 1. What you are building
 
-A Bangladeshi manual-payment checkout, four methods:
+A Bangladeshi manual-payment checkout, copied from a live product that
+takes real payments every day (2026-09-22 snapshot):
 
-1. A **method picker** — bKash / Nagad / Rocket (+ Bank if the merchant has one),
-   each with its real logo.
-2. A **send-money popup** — brand header strip, amount card, copy-able receiver
-   number (or full bank details with one-tap copy-all), step-by-step
-   instructions, and a validated reference input:
-   - bKash / Nagad → the customer's **sender phone number** (`01XXXXXXXXX`).
-   - Rocket → a **Transaction ID** (10 alphanumerics).
-   - Bank → a **transaction ID / reference** (4–40 chars, `A-Z 0-9 / -`).
-3. **Wallet switcher tabs inside the popup** — balance short in bKash? Switch
-   to Nagad without losing the popup (the typed sender number survives a
-   bKash↔Nagad switch; Rocket gets a fresh TrxID field).
-4. **Reopen after refresh** — the open popup, chosen wallet, amount and the
-   half-typed reference all survive a page refresh or a trip to the wallet app
-   (localStorage, namespaced by `popupKey`).
-5. **Soft-keyboard & IME survival** — the part you cannot see in a screenshot,
-   battle-tested against Facebook's in-app browser. See §7; it is most of the
-   value of this kit.
-6. On submit, the validated reference is handed to **your backend**, which
-   records the claim; an admin later verifies the money and unlocks whatever
-   the payment was for.
+```
+  section heading  →  আপনার নাম / ফোন নাম্বার  →  বিকাশ · নগদ · রকেট · ব্যাংক tiles
+                                                          │
+                       sticky "৳X টাকা পেমেন্ট করুন" bar  ─┘
+                                                          ▼
+   ┌─ popup ──────────────────────────────────────────────────────────┐
+   │ wallet tabs · amount · number to copy · three steps ·            │
+   │ "যে বিকাশ নম্বর থেকে টাকা পাঠালেন" · [লেনদেন যাচাই করুন]        │
+   │                       ▼ submit                                   │
+   │ the ANSWER, one card: checking… / ৳X পেয়েছি ✓ / টাকাটা এখনো   │
+   │ পৌঁছায়নি (live clock, নম্বর বদলান, the number again, continue)   │
+   └──────────────────────────────────────────────────────────────────┘
+                                                          ▼
+                       done card: পেমেন্ট পাওয়া গেছে ✓ · [রেজিস্ট্রেশন সম্পন্ন করুন]
+```
 
-It is intentionally **backend-agnostic**: UI + validation + UX only.
+Behind it, on the server: the claim is stored, the popup polls "did the
+money arrive?", and the **SmartPay Auto Verify** app on the receiving phone
+posts every payment SMS to a webhook that matches it to the claim. The
+money is confirmed on the server — never in the browser.
 
-## 2. Two variants — pick by stack
+Three layers, three folders:
 
-| Variant | Use when | Coverage |
+| layer | folder | what |
 |---|---|---|
-| **`vanilla/`** — the master copy | Laravel/Blade, Django, Rails, plain PHP, any server-rendered page — and the porting source for everything else | All four methods, tabs, refresh-restore, prefill, keyboard kit — the full production feature set |
-| **`react/`** | React / Next SPA | The same four methods, tabs, refresh-restore and prefill, as props |
+| UI | `react/` **or** `vanilla/` (+ `checkout.css`, `keyboard-aware.js`, `assets/`) | the checkout, pixel-faithful |
+| server | `server/` (`node/` reference + tests, `laravel/`, `wordpress/`) | claims, the poll, the SmartPay webhook |
+| phone | the SmartPay app (separate repo, linked in `server/CONTRACT.md` §7) | reads the SMS, posts it |
 
-**`vanilla/` is canonical.** The two are at feature parity, so pick by stack —
-but when they disagree, `vanilla/send-money-popup.html` is right, and a fix
-belongs in both. Its DOM structure, class names (`dp-*`) and logic transfer
-almost line by line.
+## 2. Discovery — read the host project first
+
+Decide these before you copy anything, and say what you decided:
+
+1. **Stack → variant.** React/Next → `react/`. Blade, Django, Rails, plain
+   PHP, static HTML → `vanilla/`. Both render the same DOM from the same
+   `checkout.css`; pick by stack, never mix.
+2. **What does the payment buy?** An account, an order, a course seat, a
+   renewal. It sets three things: the labels that name it (§5 — "অ্যাকাউন্ট
+   চালু" vs "অর্ডার কনফার্ম"), what `onSuccess` navigates to, and what the
+   server does when money is confirmed.
+3. **Is the buyer known?** Anonymous landing page → keep the name + phone
+   form (`askLead`, the default) — it is the only record of a visitor who
+   leaves. Signed-in user / order already placed → `askLead: false` and use
+   the account's phone as `lead.phone` on the server.
+4. **Where do merchant numbers live?** Find the settings table / admin
+   panel / `.env`. They are served to the page; they are never typed into
+   a template twice.
+5. **Where do claims live?** If the project has an `orders` table, the
+   order **is** the claim — add the columns (`server/laravel/database/
+   migrations/…payment_claims…`) to it rather than creating a second
+   table. Otherwise create `payment_claims`.
+6. **Existing routes / auth / CSRF conventions** for the four endpoints
+   (`server/CONTRACT.md`). The webhook must be CSRF-exempt and public
+   (Bearer-secret), served at an exact final HTTPS URL with no redirect.
+7. **Analytics.** Meta pixel present? Then `onTrack` maps to it — and you
+   remove any browser-side `Purchase` you find (§6).
+8. **Font.** Anek Bangla. If the project does not load it, add the Google
+   Fonts `<link>` (or self-host); the fallbacks keep the layout but not the
+   look.
 
 ## 3. Files
 
 ```
-vanilla/
-├── send-money-popup.html   ← CONFIG block + CSS + markup + logic. Paste into your
-│                             checkout page/partial; edit ONLY the DP_CONFIG block.
-├── keyboard-aware.js       ← page-level soft-keyboard kit. Include ONCE on any page
-│                             with a form a phone will fill in (not just checkout).
-├── bd-phone.js             ← BD phone smart-normalizer; load BEFORE the popup script.
-└── assets/{bkash,nagad,rocket}.webp
+checkout.css              ONE stylesheet, both variants — verbatim from production; do not edit numbers
+keyboard-aware.js         soft-keyboard kit. Include ONCE per page (index.html / layout), any page with a form
+assets/{bkash,nagad,rocket}.webp   the logos (bank draws its own tile)
 
 react/
-├── SendMoneyPopup.tsx      ← the core popup (import this if you have your own picker)
-├── SendMoneyCheckout.tsx   ← picker + pay button + popup (the full flow)
-├── assets/{bkash,nagad,rocket}.webp   ← bank draws an inline SVG tile, no asset
-├── assets.d.ts             ← lets TS import .webp (delete if the project has one)
-└── demo/App.tsx            ← usage example (don't ship; reference only)
-```
+├── SendMoneyCheckout.tsx   the whole flow: heading, lead form, tiles, sticky bar, popup, done card, bubble
+├── SendMoneyPopup.tsx      the popup alone (own picker? use the hook + this)
+├── useSendMoneyCheckout.ts the state machine — every handler of the production page
+├── payment.ts              types, method meta, bank helpers, storage keys
+├── labels.ts               every string, overridable
+├── bdPhone.ts · useImeInput.ts · icons.tsx · index.ts · assets.d.ts
+└── demo/App.tsx            usage (reference only)
 
-React projects still take `vanilla/keyboard-aware.js` — it is framework-agnostic
-(one `<script>` in `index.html`) and the React popup's CSS already cooperates
-with it (`html[data-kb]`, `--kb-reserve`).
+vanilla/
+├── send-money-checkout.js  the same flow in plain JS: SendMoneyCheckout.mount(el, options)
+├── bd-phone.js             load BEFORE send-money-checkout.js
+└── demo.html               usage (runs against server/node/demo-server.js)
+
+server/
+├── CONTRACT.md             the four endpoints, the SmartPay payload, matching + tolerance rules
+├── node/smartpay-rules.js  the rules as pure functions (+ smartpay-rules.test.mjs, `node --test server/node/`)
+├── node/demo-server.js     runnable reference, zero deps: `node server/node/demo-server.js`
+├── laravel/                Support/SmartPayRules.php · 3 migrations · 3 models · 3 controllers · routes.example.php · config
+└── wordpress/smartpay-verify.php   WooCommerce: the SmartPay app's own plugin + the pool + claim routes
+```
 
 ## 4. Wire it up
-
-### vanilla
-
-1. Paste `send-money-popup.html`'s contents into the checkout page. Load
-   `bd-phone.js` before its script block and `keyboard-aware.js` once per page.
-2. Fill `DP_CONFIG` **from the server** (merchant numbers, bank details, app
-   name, prefill, a per-checkout `popupKey`). In Blade that means
-   `@json($paymentNumbers)` etc. — never hardcode numbers in the markup.
-3. Drive it:
-
-```js
-// Your "pay" button:
-document.getElementById('pay').onclick = () => window.dpOpen('bkash', 490);
-
-// Your submit — the reference already passed validation:
-window.dpOnSubmit = async (provider, reference) => {
-  const res = await fetch('/payment-claim', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider, reference, amount: 490 }),
-  });
-  if (!res.ok) { window.dpToast('সমস্যা হয়েছে, আবার চেষ্টা করুন'); return; }
-  location.href = '/thank-you';          // or window.dpClose() if you stay
-};
-
-// Optional: user switched wallets inside the popup — sync your picker.
-window.dpOnSwitch = (provider) => { /* highlight the right card */ };
-```
 
 ### react
 
 ```tsx
-import { SendMoneyCheckout } from "@/components/payment/SendMoneyCheckout";
+import { SendMoneyCheckout } from '@/components/payment';   // copy react/ here
+import '@/components/payment/checkout.css';                  // copy checkout.css next to it
+// index.html: <script src="/keyboard-aware.js"></script>    // copy to public/
 
 <SendMoneyCheckout
-  amount={490}
-  receivers={{ bkash: "017...", nagad: "018...", rocket: "019..." }}  // YOUR merchant numbers
-  bank={{                                    // omit → the bank method never shows
-    bank_name: "...", account_name: "...", account_number: "...",
-    branch: "...", routing_number: "...",    // these two may be ""
-  }}
-  popupKey={`order-${order.id}`}             // turns on reopen-after-refresh
-  senderPrefill={{ bkash: "017..." }}        // returning buyer (optional)
-  onSubmit={async (provider, reference) => {
-    await api.post("/payment-claim", { provider, reference }); // <-- YOUR endpoint
-    // throw new Error("এই নম্বর আগেই ব্যবহৃত") → toast + popup stays open
-  }}
-  onSuccess={() => navigate("/thank-you")}
+  amount={2950} amountTag="বার্ষিক" doneSuffix="• বার্ষিক প্ল্যান"
+  config={paymentConfig}                    // { bkash, nagad, rocket, bank } from YOUR server
+  popupKey="annual"                         // one per distinct checkout (an order id)
+  support={{ whatsapp: '8801…', offer: 'X-এর বার্ষিক প্ল্যান (২,৯৫০ টাকা)' }}   // omit → no WhatsApp line/bubble
+  onLead={(lead, stage, extra) => api.post('/lead', { ...lead, stage, ...extra })}
+  onSubmit={claim => api.post('/payment-claim', claim)}           // throw new Error('বাংলায় কারণ') → under the field
+  checkClaim={claim => api.post('/payment-claim/check', claim)}   // → ClaimCheck
+  onSuccess={info => navigate('/register')}                       // or '/thank-you', `/order/${id}`
+  onTrack={(event, params) => fbq('track', event, params)}        // InitiateCheckout · AddPaymentInfo · Contact — never Purchase
 />
 ```
 
-Serve `receivers` / `bank` from the server (an admin-editable settings row if
-the project has a panel) — never hardcode a merchant number in the bundle.
-Already have your own method picker? Import `<SendMoneyPopup>` alone and pass
-it `provider`, `receivers`, `bank` and `onSwitch`.
+Own method picker? `const c = useSendMoneyCheckout(options)` → your tiles
+call `c.openPopup('bkash')` → render `<SendMoneyPopup checkout={c} />`.
+Sticky bar off (`stickyCta={false}`) → drive it through the ref:
+`ref.current.pay()`.
 
-## 5. The seams (what changes per project)
+### vanilla
 
-| Seam | vanilla | react |
+```html
+<link rel="stylesheet" href="/vendor/payment/checkout.css">
+<div id="pay"></div>
+<script src="/vendor/payment/bd-phone.js"></script>
+<script src="/vendor/payment/send-money-checkout.js"></script>
+<script src="/vendor/payment/keyboard-aware.js"></script>
+<script>
+  SendMoneyCheckout.mount(document.getElementById('pay'), {
+    amount: {{ $price }}, amountTag: 'বার্ষিক',
+    config: @json($paymentConfig),          // from the server — never hardcoded here
+    assetsBase: '/vendor/payment/assets',
+    popupKey: 'annual',
+    support: { whatsapp: '8801…', offer: '…' },
+    onLead:     (lead, stage, extra) => post('/api/lead', { ...lead, stage, ...extra }),
+    onSubmit:   claim => post('/api/payment-claim', claim),          // returns a Promise; reject(Error('বাংলায় কারণ')) → under the field
+    checkClaim: claim => post('/api/payment-claim/check', claim),    // Promise<ClaimCheck>
+    onSuccess:  info => { location.href = '/register'; },
+    onTrack:    (event, params) => fbq && fbq('track', event, params),
+  });
+</script>
+```
+
+`mount()` returns `{ pay(), open(method), reset(), destroy() }`.
+
+### server
+
+Implement the four endpoints of `server/CONTRACT.md` in the host's
+framework, from the reference closest to it:
+
+- **Laravel**: copy `server/laravel/` into `app/`, `database/`, `config/`,
+  rename the migrations to today's date, add `routes.example.php` to
+  `routes/api.php`, set `SMARTPAY_SECRET` in `.env`, fill the two "your
+  seam" comments (attach the claim to the order/user; confirm the money).
+- **WordPress / WooCommerce**: `server/wordpress/smartpay-verify.php` as a
+  plugin. The order is the claim; run the checkout on the order-pay page
+  with `popupKey` = the order id. Change `SMARTPAY_SECRET` and, if the
+  checkout already saves the sender number under another meta key, the two
+  `SMARTPAY_META_*` constants.
+- **Node / anything else**: port `server/node/smartpay-rules.js` (pure
+  functions, tests included) and wire it like `demo-server.js` does — its
+  handlers are the contract, in about 60 lines.
+- **Firebase / serverless**: the same handlers as callables + one HTTP
+  function for the webhook; `received_payments` = a collection with a
+  `used` flag.
+
+Then hand the human the SmartPay app setup (CONTRACT.md §7): URL, secret,
+site name — and run the `curl` before they touch the app.
+
+## 5. The seams — what changes per project, and what does not
+
+| seam | react | vanilla |
 |---|---|---|
-| Merchant numbers / bank details | `DP_CONFIG.numbers` / `DP_CONFIG.bank` (fill server-side) | `receivers` / `bank` props |
-| Amount | `dpOpen(provider, amount)` | `amount` prop |
-| Backend claim endpoint | your `window.dpOnSubmit` | your `onSubmit` |
-| Post-success action | redirect or `dpClose()` in `dpOnSubmit` | `onSuccess` |
-| Brand/app name | `DP_CONFIG.appName` | `popupLabels.brandSubtitle` |
-| Refresh-restore namespace | `DP_CONFIG.popupKey` (one per checkout page) | `popupKey` prop |
-| Sender prefill (returning buyer) | `DP_CONFIG.senderPrefill` | `senderPrefill` prop |
-| Wallet switched in-popup | `window.dpOnSwitch` | `onSwitch` (the picker syncs itself) |
-| All UI copy | edit the markup | `popupLabels` (every string, incl. bank rows) |
-| Logo folder | `DP_CONFIG.assetsBase` | bundler imports |
+| amount, its tag in the popup, the done card's suffix | `amount`, `amountTag`, `doneSuffix` | same names in `options` |
+| merchant numbers / bank | `config` | `config` |
+| section heading (or none) | `heading` / `heading={null}` | `heading` / `null` |
+| name + phone before paying | `askLead` (default true) | `askLead` |
+| the WhatsApp door | `support.{whatsapp, offer, bubble}` | same |
+| refresh-restore namespace | `popupKey` | `popupKey` |
+| the four server calls | `onLead`, `onSubmit`, `checkClaim`, `onSuccess` | same |
+| analytics, "the popup is opening" | `onTrack`, `onOpen` | same |
+| every string | `labels` | `labels` |
+| logos | bundler imports (`react/assets/`) or `logos` | `assetsBase` or `logos` |
 
-Both variants namespace the refresh-restore under the same
-`dp_pay_{open,ref,amt}_<popupKey>` keys, so a project migrating vanilla → React
-does not strand a buyer's half-typed reference mid-payment.
+**Labels you will actually change** — the ones that name what the payment
+buys. Production sells an account, so the defaults say রেজিস্ট্রেশন /
+অ্যাকাউন্ট চালু. For a shop: `ctaDone`, `doneButton`, `doneNote`,
+`foundSub`, `foundButton`, `payNowNote`, `continueButton`, `neutralSub`,
+`missingSubBank` → "অর্ডার কনফার্ম". Change the noun, keep the sentence —
+each line was rewritten until it read like a person, not a system (e.g.
+"টাকাটা এখনো পৌঁছায়নি", not "পেমেন্ট পাওয়া যায়নি").
 
-## 6. Backend contract (implement on the host's server)
+**What does not change.** Sizes, colours, spacing, fonts, icons, the three
+steps, the order of things in the popup, the tab row, the answer card's
+shape, the sticky bar. `checkout.css` is verbatim production; if the host
+has its own design system, the checkout still looks like this — that is
+what "same to same" means. Scope: everything sits under `.bd-pay`, so the
+host's CSS reset does not reach in and the kit's rules do not leak out.
 
-The kit posts nothing itself — YOU do, in `dpOnSubmit`/`onSubmit`. Typical:
+## 6. Money is confirmed on the server — the rule behind the whole kit
 
-- **POST** `/payment-claim` body `{ provider, reference }`
-  - `provider`: `bkash | nagad | rocket | bank`
-  - `reference`: bkash/nagad → sender phone `01\d{9}` · rocket → TrxID
-    `[A-Za-z0-9]{10}` · bank → `[A-Za-z0-9/-]{4,40}`.
-  - **Re-validate server-side** — never trust the client, especially the amount.
-  - Store as a *pending* claim; an admin/webhook later matches the money.
-- Serve merchant numbers/bank details from server config (admin-editable if
-  you have a panel), through the page render or a read-only endpoint.
-- Phone rule on the server must mirror the client's: 11 digits starting `01`,
-  **nothing said about the operator digit** — operators reshuffle ranges, and a
-  hardcoded 013–019 list rejects real customers the day a new range opens.
+The popup's Submit is **a claim, not a sale**. In the product this was
+copied from, most submits were a number typed with no money sent; the
+browser fired Meta `Purchase` on Submit; Meta optimised the ads toward
+exactly those people, at great cost. So:
 
-## 7. Soft keyboard & IME — why half this kit exists
+- The browser reports `InitiateCheckout` (popup opened), `AddPaymentInfo`
+  (submit), `Contact` (WhatsApp tap) through `onTrack` — **never
+  `Purchase`**. If the host fires `Purchase` from the browser today, remove
+  it.
+- The server confirms the money in exactly two places (CONTRACT.md §4/§5):
+  when the SmartPay webhook settles a claim, and when the poll finds a
+  pooled payment. That is where the account activates, the order is marked
+  paid, and `Purchase` goes to the Conversions API with the real amount.
+- Without a live verifier (`checkClaim` absent, or `verifier: off/stale`)
+  the popup says "পেমেন্ট যাচাই চলছে" and lets them continue; it never
+  says "not received", and nothing is confirmed.
 
-**The bug:** a buyer arrives from a Facebook ad, so the page opens inside
-Facebook's in-app WebView. They tap the reference field and the keyboard slides
-up **over** it — Chrome shrinks the page and scrolls the field clear on its
-own; the in-app WebView resizes nothing, scrolls nothing, and often does not
-even fire the `visualViewport` resize event (the numbers change, the
-announcement never comes). The field keeps receiving keystrokes the buyer
-cannot see — on the exact screen standing between money already sent and the
-order that records it.
+## 7. The behaviour a screenshot cannot show — do not "fix" these
 
-**What `keyboard-aware.js` does about it** (include once per page; it needs no
-markup and no config):
+Each of these was a reported bug in production. They are all in both
+variants; keep them when adapting.
 
-- Measures how much keyboard the browser did NOT account for and reserves that
-  room at the foot of the document (`html[data-kb]`, `--kb-reserve`), so the
-  page *can* scroll the field clear. In Chrome the measurement is zero and
-  nothing happens at all.
-- Nudges the focused field above the keyboard **once**, only if genuinely
-  covered — inside the popup's own scroller, because scrolling the page under
-  a fixed overlay moves nothing while looking like success.
-- Runs a **heartbeat** (600ms, only while a field is focused) because
-  Facebook's WebView fires no events: it re-measures, corrects late-opening
-  keyboards and suggestion strips, notices the keyboard Android's back button
-  closed, then retires itself.
-- Stands down when the visitor scrolls, freezes during IME composition, holds
-  still under pinch-zoom, resets after bfcache restores.
-
-**The popup's half of the contract** (already in both variants' CSS/JS):
-
-- `html[data-kb] .dp-center{padding-bottom:…+var(--kb-reserve)}` — the overlay
-  is its own scroller, so it must spend the reserved room itself.
-- `scroll-margin-bottom` on the input — "when you reveal me, reveal the submit
-  button under me too". Chrome honours it natively; the kit honours it in
-  broken hosts.
-- Enter/done on the keyboard submits — the one control a keyboard cannot cover.
-- The toast lifts above the keyboard under `html[data-kb]`.
-- `overscroll-behavior:contain` — the overlay's end-of-scroll must not
-  rubber-band the page behind it.
-
-**The IME rules** (Bangla keyboards, Gboard suggestions, swipe typing):
-
-- Never write to `.value` mid-composition — normalize when it commits
-  (`compositionend`), never during. Rewriting mid-word snaps the caret and
-  corrupts the word.
-- Facebook's WebView has been seen committing a composition **without firing
-  `compositionend`**. Treat blur as a commit, and normalize once more at
-  submit. Any "am I composing?" flag must be cleared on blur/focus or it
-  sticks forever.
-
-### Do not "fix" these — they are deliberate
-
+- **The reference field starts EMPTY on every open — never prefilled**, not
+  from the order form's phone, not from the account, `autocomplete="off"`.
+  Copying our number and typing theirs is the one act that has to follow
+  the sending; prefilled, the popup was one tap and the money never sent.
+  And the phone's own number is wrong whenever the money went from someone
+  else's wallet (a relative's, as often as not).
+- **The field is not autofocused.** On one screen the keyboard would cover
+  the number they came to copy.
+- **Nothing is written to an input mid-IME-composition** (`useImeInput` /
+  `imeInput`): a Bangla keyboard holds half a word in a buffer the browser
+  owns; rewriting `.value` then turns ০১৭ into ০১৭১. Normalise on
+  `compositionend` — and on blur, because Facebook's WebView commits
+  without the event — and once more at submit.
+- **The keyboard's enter key submits** (done/next/blur on the right
+  fields), `isComposing`/229 excluded — the one control a keyboard cannot
+  cover.
+- **The name/phone jump on validation is instant, `block: 'start'`**, with
+  `preventScroll` on focus: centred is behind the keyboard in Facebook's
+  browser, smooth is a page still moving when the keyboard kit looks.
+- **`keyboard-aware.js`**: Facebook's in-app browser draws the keyboard
+  over the page and reports nothing. The kit shortens the popup to the safe
+  band and scrolls the field's *bottom* (plus its `scroll-margin-bottom`,
+  the submit button) to the foot of that band — never a landing line at the
+  top, never by adding padding. Read its header before touching it; run its
+  tests if you do (`tools/keyboard` in the origin repo).
 - **`interactive-widget=resizes-content` is rejected**, not forgotten: it
-  changes what `100vh` means in every browser, including the ones with no bug.
-- **The heartbeat's reserve never merely shrinks while typing** (it may grow,
-  or drop to zero) — chasing a breathing suggestion strip is the
-  "screen keeps jumping while I type" bug in the flesh.
-- **The nudge threshold (12px) and the hands-off-on-touch rule** are what keep
-  the popup from fighting the user for the scroll position.
-- **The popup does not autofocus the input** — the buyer must read the number
-  and steps first; an instant keyboard would cover them.
-- **Background scroll locks** while the popup is open (`body.overflow=hidden`);
-  the buyer leaves to the wallet app and comes back — the page must not have
-  scrolled away underneath.
-- **Wallet maxLength is 20, not 11** — the browser enforces `maxLength` on
-  paste *before* any script sees the text, so the field must hold the longest
-  form a buyer might paste (`+880 1712-345678`, 16 chars) intact. Clip it to
-  11 — or to the 14 this kit shipped until its own paste test caught it — and
-  a valid pasted number arrives mangled, then gets rejected. The normalizer is
-  the real cap: it trims to 11 digits on commit.
-- **React: the popup is portaled to `<body>`** so its overlay escapes every
-  ancestor stacking context; un-portal it and a sticky header paints over the
-  backdrop.
-- **Clipboard has a legacy `execCommand` fallback** for old in-app browsers.
-- **Close asks for confirmation** so a stray tap doesn't discard a half-typed
-  reference.
+  changes `100vh` in every browser, including the ones with no bug.
+- **The popup restores after a refresh** (localStorage, `bdpay_ui_<key>`)
+  — the buyer goes to the wallet app and comes back.
+- **Wallet tabs keep the typed number**; the picker follows the tab. Bank
+  has no tab: a one-way door from the picker.
+- **✕ asks first.** A stray tap must not discard a half-typed number for
+  money already sent.
+- **The answer never accuses.** "টাকাটা এখনো পৌঁছায়নি" + "১–২ মিনিট লাগতে
+  পারে", the number to send to again ("এখনো না পাঠিয়ে থাকলে"), "নম্বর
+  বদলান", and only after 30 s "রেজিস্ট্রেশন করে রাখুন". Bank gets one
+  check and the continue button at once (nobody relays a bank credit within
+  minutes).
+- **`found` shows the green tick for 1.4 s before leaving** — a page that
+  jumps the instant it says "received" reads as though it had not.
+- **Body scroll is locked while the popup is open**; unlocked on close.
+- **Wallet `maxLength` is unset**: the browser clips a paste *before* any
+  script sees it; `+880 1712-345678` must arrive whole and be folded to 11
+  digits by the normaliser.
+- **The done card tells the truth**: a claim the money has not confirmed
+  says "টাকাটা এখনো পৌঁছায়নি" with "পাঠিয়েছি, আবার দেখুন" — never "done".
+- **The WhatsApp bubble yields to the form**: it slides out while the
+  checkout section is in the upper half of the screen, waits 1.2 s after
+  paint, and is gone while the popup is open.
 
 ## 8. Verify after implementing
 
-Desktop/Chrome:
-1. Picker shows the configured methods; pay button opens the popup with the
-   right brand color + logo; copy button copies and toasts.
-2. bKash/Nagad reject anything but a valid `01xxxxxxxxx` (shake + toast);
-   Rocket rejects anything but 10 alphanumerics; bank rejects <4 chars.
-3. Pasting `+8801712-345678` or `০১৭১২৩৪৫৬৭৮` into bKash/Nagad becomes
-   `01712345678`.
-4. Switching tabs bKash→Nagad keeps the typed number; →Rocket clears it.
-5. Refresh mid-payment: the popup reopens with wallet, amount and typed
-   reference intact. Submit or confirmed-close clears the restore.
-6. Bank flow (if configured): details render, copy-all copies every row with
-   labels, submit validates the reference. No wallet tabs appear on bank — it
-   is a one-way door.
+Desktop / Chrome (`node server/node/demo-server.js` shows the expected
+behaviour side by side):
 
-Both variants are expected to pass 1–6 identically. If the React one diverges,
-`vanilla/` is the answer and `react/` is what needs fixing.
+1. Tiles show only the configured methods; the sticky bar says the price;
+   tapping it with the form empty flags the name field and opens nothing.
+2. Name + phone (try `০১৭১২ ৩৪৫ ৬৭৮`) → the number reads `01712345678`;
+   the lead endpoint got `typed`, then `checkout` when the popup opens.
+3. Popup: brand colour, logo, the number, copy works, the field is empty
+   and not focused, tabs switch and keep the typed number, refresh
+   restores everything.
+4. `0171` → Bangla error under the field. A valid number + Enter → the
+   checking card, then the amber "not yet" card with a clock; no continue
+   button for 30 s; "নম্বর বদলান" returns to the form with the number.
+5. Play the SmartPay app with the `curl` in `demo-server.js` (sender =
+   the typed number) → within 8 s the green card, then the done card and
+   `onSuccess`. Run the `curl` **first** and type after → found at once.
+6. Rocket: TrxID field, caps, `rock 123456` → `ROCK123456`. Bank: five
+   rows, copy-all, no tabs, one check, primary continue button.
+7. The same `curl` twice → the same reply, one approval.
+8. `Purchase` is nowhere in the browser bundle.
 
-Mobile — **test inside the Facebook app's browser, not just Chrome** (share the
-URL to yourself on Messenger and open it from there):
-7. Focus the reference field: within a second the field AND the submit button
-   sit above the keyboard. No jumping while typing with a Bangla keyboard.
-8. Scroll while the keyboard is up: the page stays where you put it.
-9. Close the keyboard with Android's back button: the reserved space clears.
-10. The keyboard's enter key submits; the validation toast is visible above
-    the keyboard, not behind it.
+On the phone — **inside the Facebook app's browser, not just Chrome**
+(share the URL to yourself on Messenger):
+
+9. Tap the reference field: within a second the field AND the submit
+   button sit above the keyboard; no jumping while typing with a Bangla
+   keyboard; the page stays where you scroll it; the keyboard's enter
+   submits.
+
+Then the real thing: a ৳10 payment to the merchant number with the app
+running → the popup finds it, the app's Payments tab shows the site name
+and the claim number.
+
+## 9. Hand back to the human
+
+- `SMARTPAY_SECRET` to generate and paste into the app; the webhook URL;
+  the site name.
+- The merchant numbers / bank account to fill in wherever you put them
+  (admin panel > `.env`).
+- If Meta ads: the Conversions API token for the server-side `Purchase`,
+  and confirmation that the browser `Purchase` is gone.
+- Which noun you chose for the labels (§5), so they can correct it.
