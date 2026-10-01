@@ -17,8 +17,16 @@
 
    There are three kinds of host, and this kit has to survive all of them:
 
-     A. Chrome. The viewport shrinks, events fire, the browser scrolls the
-        field into view itself. We measure zero and stay out of the way.
+     A. Chrome, Safari: a browser that KNOWS the keyboard. Chrome before 108
+        shrank the layout viewport, so we measured zero. Chrome 108+ on
+        Android and iOS Safari shrink only the VISUAL viewport
+        ("resizes-visual"): 100vh and position:fixed are untouched, vv.height
+        drops by the keyboard, and the browser scrolls the field into that
+        smaller window on its own — on focus, on the keyboard's Next, and on
+        every keystroke (the caret reveal). Here we measure the WHOLE
+        keyboard, and the measurement is for overlays only (--kb-vh,
+        --kb-top, --kb-reserve below): the page itself needs nothing from us,
+        and must get nothing — see "the room is for a guess" further down.
 
      B. A WebView that resizes nothing but whose visualViewport still carries
         honest NUMBERS — vv.height shrinks — while not reliably firing the
@@ -91,6 +99,24 @@
         scroll, a right one is the difference between a sale and a buyer
         typing into a field they cannot see.
 
+   The room is for a GUESS. Point 1's room at the foot of the document and
+   the landing line (--kb-foot, a scroll-padding-bottom that tells the
+   browser's own focus scroll where to land a field) exist only for a
+   keyboard the browser does not know about — host C. Never on a
+   measurement. The version this replaces hung both off every reserve, and
+   on Chrome 108+ / Safari that was a double count: the browser already
+   aims its scroll-into-view at the visual viewport the keyboard shrank,
+   and scroll-padding is subtracted from THAT (Blink's RootFrameViewport::
+   VisibleScrollSnapportRect is visual ∩ layout, then minus the padding), so
+   a padding the size of the keyboard left no target area at all. Every
+   keystroke's caret reveal then "revealed" into a strip of nothing at the
+   top of the screen — the field pinned under the browser bar, the page
+   jumping on the second letter (akhanei.com.bd checkout, Android Chrome,
+   2026-10-01). The room at the foot was the other half of the same
+   mistake: unseen while typing, and a jump the moment the keyboard went
+   and the page was clamped back out of it. So: data-kb-guess carries the
+   page-level half, data-kb only what an overlay spends.
+
    The obvious implementation of all this is scrollIntoView on every focus;
    that is also the version that makes the screen jump, because it fights the
    browser's own scrolling, fires again on every keyboard resize, and drags
@@ -158,7 +184,11 @@
 
     var root = document.documentElement;
 
-    /* The room from point 1, as CSS. Padding on the ROOT element, not on body:
+    /* The room from point 1, as CSS — on data-kb-guess, never on data-kb:
+       the room and the landing line are for a keyboard the browser did not
+       report (host C). Where it did, the browser's own scrolling already
+       accounts for the keyboard and both would count it twice (the header's
+       "the room is for a guess"). Padding on the ROOT element, not on body:
        body often carries min-height:100vh, and with border-box sizing padding
        inside that just re-centres content instead of lengthening the document.
        html has no height of its own, so its padding is pure scroll range.
@@ -173,7 +203,7 @@
        heartbeat 600ms later. */
     var css = document.createElement('style');
     css.textContent =
-        'html[data-kb]{padding-bottom:var(--kb-reserve,0px);' +
+        'html[data-kb-guess]{padding-bottom:var(--kb-reserve,0px);' +
         'scroll-padding-bottom:var(--kb-foot,0px);}';
     document.head.appendChild(css);
 
@@ -229,10 +259,13 @@
     }
 
     /* How much of the keyboard the page has NOT already been shrunk to account
-       for. In Chrome that difference is zero — the layout viewport shrank by the
-       full keyboard height — so we reserve nothing and change nothing. In the
-       in-app browser the layout never moved, so the difference is the whole
-       keyboard, and that is exactly the scroll range the document is missing. */
+       for. In Chrome before 108 that difference was zero — the layout viewport
+       shrank by the full keyboard height — so we reserved nothing. In Chrome
+       108+ and Safari the layout never moves, so the difference is the whole
+       keyboard: a number for the overlays (a fixed card must shorten itself),
+       NOT room for the page — the browser pans its visual viewport over the
+       foot of the document by itself. Room on the page is a guess's business
+       (data-kb-guess, point 4). */
     function measure() {
         /* Zoomed: hold whatever we already had rather than read a lie. */
         if (zoomed()) return reserve;
@@ -295,6 +328,11 @@
     function syncAttr() {
         if (reserve > 0 || band > 0) root.setAttribute('data-kb', '');
         else root.removeAttribute('data-kb');
+        /* The page-level half — room at the foot, the landing line — only
+           while the reserve is a guess (point 4). A measured keyboard is one
+           the browser knows, and it scrolls the page for that itself. */
+        if (reserve > 0 && assumed) root.setAttribute('data-kb-guess', '');
+        else root.removeAttribute('data-kb-guess');
     }
 
     /* The height a fixed overlay may use, in px. Measured from the visual
@@ -314,10 +352,14 @@
     }
 
     /* Where the browser's own scrolling should land a field (see the CSS
-       above). Refreshed on every reserve, guess or measurement alike: the same
-       number can be a guess one beat and a measurement the next. */
+       above): the foot of the safe band, and only while the keyboard is a
+       GUESS. A measured keyboard is already subtracted from the window the
+       browser scrolls into; publishing it again as scroll-padding is how a
+       field ends up pinned under the browser bar on every keystroke (the
+       header's "the room is for a guess"). Refreshed on every reserve: the
+       same number can be a guess one beat and a measurement the next. */
     function publishFoot(next) {
-        var foot = next > 0 ? (assumed ? Math.round(root.clientHeight * (1 - SAFE_BAND)) : next + GAP_ABOVE) : 0;
+        var foot = next > 0 && assumed ? Math.round(root.clientHeight * (1 - SAFE_BAND)) : 0;
         if (foot === lastFoot) return;
         lastFoot = foot;
         if (foot > 0) root.style.setProperty('--kb-foot', foot + 'px');

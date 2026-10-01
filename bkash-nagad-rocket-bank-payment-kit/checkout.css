@@ -598,8 +598,14 @@
    measurement at all: no event and no number. There, nothing below ever
    fires, and the card's position at rest is the only position it has.)
 
-   Where the browser resizes the page itself (Chrome), keyboard-aware.js
-   measures zero, never sets data-kb, and none of this applies. */
+   Where the browser resizes the page itself (Chrome before 108),
+   keyboard-aware.js measures zero, never sets data-kb, and none of this
+   applies. Chrome 108+ and Safari shrink only the visual viewport, so the
+   kit measures the keyboard and these rules DO run — a fixed card is laid
+   out against the layout viewport the keyboard never shrank, and would sit
+   behind it otherwise. Only the overlay spends that number; the page gets
+   nothing on a measured keyboard (the kit's header, "the room is for a
+   guess"). */
 html[data-kb] .bd-pay .pay-overlay {
     align-items: flex-start;
     /* An adjustPan host scrolls the whole page up rather than resizing it, and

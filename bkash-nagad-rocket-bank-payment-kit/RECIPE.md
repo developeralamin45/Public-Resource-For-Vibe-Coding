@@ -260,6 +260,17 @@ variants; keep them when adapting.
   the submit button) to the foot of that band — never a landing line at the
   top, never by adding padding. Read its header before touching it; run its
   tests if you do (`tools/keyboard` in the origin repo).
+- **The page gets room and a landing line only for a GUESSED keyboard**
+  (`html[data-kb-guess]`, Facebook's browser). Chrome 108+ on Android and
+  iOS Safari shrink only the *visual* viewport, so the kit measures the
+  whole keyboard there — and that number is for the overlay's sizing
+  (`--kb-vh`, `--kb-top`, `--kb-reserve` under `html[data-kb]`), never for
+  the page: the browser already scrolls the field into the window it
+  shrank, and subtracts `scroll-padding` from *that* window. Publishing the
+  keyboard as `scroll-padding-bottom` on top counted it twice, left no
+  target area, and every keystroke pinned the field under the browser bar
+  (akhanei.com.bd checkout, Android Chrome, 2026-10-01). Do not hang the
+  page-level room off `data-kb` again.
 - **`interactive-widget=resizes-content` is rejected**, not forgotten: it
   changes `100vh` in every browser, including the ones with no bug.
 - **The popup restores after a refresh** (localStorage, `bdpay_ui_<key>`)
@@ -315,6 +326,10 @@ On the phone — **inside the Facebook app's browser, not just Chrome**
    button sit above the keyboard; no jumping while typing with a Bangla
    keyboard; the page stays where you scroll it; the keyboard's enter
    submits.
+10. In Chrome and Safari too: tap the checkout's name and phone fields and
+    type a few letters. The field stays where the browser put it, never
+    jumping to the top edge, and no white band appears under the form once
+    the keyboard goes.
 
 Then the real thing: a ৳10 payment to the merchant number with the app
 running → the popup finds it, the app's Payments tab shows the site name
