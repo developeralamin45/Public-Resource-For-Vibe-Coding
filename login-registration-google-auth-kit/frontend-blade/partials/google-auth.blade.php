@@ -1,11 +1,18 @@
-{{-- "Continue with Google" button — Google Identity Services (implicit token flow).
-     Posts the access token to /auth/google, which verifies it with Google and
-     answers with where to go: the dashboard for a known address, or the
-     registration form — already filled in — for one the site has not seen.
-     The client id comes from Admin → Site settings → Google login, falling back to
-     GOOGLE_CLIENT_ID in .env. The caller only includes this once configured. --}}
-@php($googleClientId = \App\Support\GoogleAuth::clientId())
+{{-- "Continue with Google" — the button, its error line and the "or with email"
+     divider, as one block that is shown or hidden whole.
 
+     Google Identity Services (token flow): a popup, an access token, and a POST
+     to /auth/google, which verifies the token with Google and answers with
+     where to go — the dashboard for a known address, the one-field last step
+     for one the site has not seen.
+
+     The client id comes from Admin → Site settings → Google login, falling back
+     to GOOGLE_CLIENT_ID in .env. The caller includes this only when
+     GoogleAuth::offeredTo() says the button can work for this visitor. --}}
+@php($googleClientId = \App\Support\GoogleAuth::clientId())
+@php($activeTab = $activeTab ?? 'login')
+
+<div id="google-block">
 <button type="button" id="google-signin"
         class="w-full flex items-center justify-center gap-3 py-3.5 rounded-xl font-semibold text-sm sm:text-base text-fg bg-ink-850 border border-ink-700 hover:border-ink-600 hover:bg-ink-800 transition active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed">
     <svg class="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true">
@@ -18,11 +25,33 @@
 </button>
 <p id="google-error" class="mt-2 text-center text-sm text-red-500" hidden></p>
 
+{{-- Divider --}}
+<div class="my-6 flex items-center gap-3" aria-hidden="true">
+    <div class="flex-1 h-px bg-ink-700"></div>
+    <span id="email-divider-label" class="text-xs font-medium text-fg-faint whitespace-nowrap">or {{ $activeTab === 'register' ? 'register' : 'sign in' }} with email</span>
+    <div class="flex-1 h-px bg-ink-700"></div>
+</div>
+</div>
+
 @push('scripts')
 <script>
 (function () {
     var btn = document.getElementById('google-signin');
     if (!btn) return;
+
+    // The server already left this block out for an embedded browser. This is
+    // the same check again for the case the server never saw: a page served
+    // from a full-page cache or a CDN was rendered for somebody else's
+    // browser. Same list, rendered from the same constant.
+    var EMBEDDED = @json(\App\Support\GoogleAuth::EMBEDDED_BROWSER_MARKERS);
+    var ua = (navigator.userAgent || '').toLowerCase();
+    for (var i = 0; i < EMBEDDED.length; i++) {
+        if (ua.indexOf(EMBEDDED[i].toLowerCase()) !== -1) {
+            document.getElementById('google-block').hidden = true;
+            return;
+        }
+    }
+
     var label = document.getElementById('google-signin-label');
     var errorEl = document.getElementById('google-error');
     var CLIENT_ID = @json($googleClientId);
@@ -39,7 +68,13 @@
             var s = document.createElement('script');
             s.src = GIS_SRC; s.async = true; s.defer = true;
             s.onload = resolve;
-            s.onerror = function () { reject(new Error('Could not load the Google script')); };
+            s.onerror = function () {
+                // Forget the failure, or one dropped request would break the
+                // button until the page is reloaded.
+                scriptPromise = null;
+                s.remove();
+                reject(new Error('Could not load the Google script'));
+            };
             document.head.appendChild(s);
         });
         return scriptPromise;
@@ -51,23 +86,42 @@
     }
 
     async function postToken(accessToken) {
-        var res = await fetch(@json(route('auth.google')), {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
-            },
-            body: JSON.stringify({ access_token: accessToken }),
-        });
+        var res;
+        try {
+            res = await fetch(@json(route('auth.google')), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                },
+                body: JSON.stringify({ access_token: accessToken }),
+            });
+        } catch (e) {
+            // Offline, or the request never left: the button must come back.
+            setBusy(false);
+            showError('No connection. Check your internet and try again.');
+            return;
+        }
         var data = await res.json().catch(function () { return {}; });
         if (res.ok && data.redirect) {
             window.location.href = data.redirect;
         } else {
             setBusy(false);
-            showError(data.message || 'Sign-in could not be completed. Please try again.');
+            showError(res.status === 419
+                ? 'This page has been open too long. Refresh it and try again.'
+                : (data.message || 'Sign-in could not be completed. Please try again.'));
         }
     }
+
+    // Fetch Google's script before it is needed. A popup may only be opened
+    // while the browser still counts the tap as "just happened"; a click that
+    // first has to download a script can outlive that on a slow connection,
+    // and the popup is then blocked with nothing on screen to say why.
+    function warmUp() { loadGis().catch(function () {}); }
+    if ('requestIdleCallback' in window) requestIdleCallback(warmUp, { timeout: 3000 });
+    else setTimeout(warmUp, 1200);
+    btn.addEventListener('pointerdown', warmUp, { passive: true });
 
     btn.addEventListener('click', async function () {
         if (busy) return;
@@ -83,7 +137,14 @@
                     if (resp && resp.access_token) postToken(resp.access_token);
                     else { setBusy(false); showError('No token received from Google.'); }
                 },
-                error_callback: function () { setBusy(false); showError('Google sign-in was cancelled.'); },
+                error_callback: function (err) {
+                    setBusy(false);
+                    // Closing the popup is a decision, not an error: say nothing.
+                    if (err && err.type === 'popup_closed') return;
+                    showError(err && err.type === 'popup_failed_to_open'
+                        ? 'The Google window was blocked. Allow pop-ups for this site and try again.'
+                        : 'Google sign-in was cancelled.');
+                },
             });
             client.requestAccessToken();
         } catch (e) {

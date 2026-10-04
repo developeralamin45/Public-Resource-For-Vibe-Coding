@@ -1,9 +1,6 @@
 @extends('layouts.auth')
 
 @php($activeTab = $activeTab ?? 'login')
-{{-- Set when the visitor got here by signing in with Google on an address the
-     site has never seen: their verified name and email, waiting to be used. --}}
-@php($googlePrefill = $googlePrefill ?? null)
 
 @section('title', $activeTab === 'register' ? 'Register' : 'Sign in')
 
@@ -25,25 +22,21 @@
         </a>
     </div>
 
-    {{-- Continue with Google (on top). Both the button and the "or by email"
-         divider hang on the same condition: with no client id configured the
-         button could only ever show an error, and a divider above nothing reads
-         as a broken page. Turn it on in Admin → Site settings → Google login. --}}
-    @if (\App\Support\GoogleAuth::configured())
-        @include('partials.google-auth')
-
-        {{-- Divider --}}
-        <div class="my-6 flex items-center gap-3" aria-hidden="true">
-            <div class="flex-1 h-px bg-ink-700"></div>
-            <span id="email-divider-label" class="text-xs font-medium text-fg-faint whitespace-nowrap">or {{ $activeTab === 'register' ? 'register' : 'sign in' }} with email</span>
-            <div class="flex-1 h-px bg-ink-700"></div>
-        </div>
+    {{-- Continue with Google (on top). The button and its "or with email"
+         divider hang on one condition, and both live inside the partial so
+         they come and go together: a divider above nothing reads as a broken
+         page. They are left out when no client id is configured (the button
+         could only ever show an error) and inside Facebook's, Instagram's and
+         other apps' embedded browsers (Google refuses to sign anyone in from
+         one, so there the button could only ever fail). --}}
+    @if (\App\Support\GoogleAuth::offeredTo(request()->userAgent()))
+        @include('partials.google-auth', ['activeTab' => $activeTab])
     @endif
 
     {{-- ═══ Login form ═══ --}}
     <form method="POST" action="{{ route('login') }}" data-panel="login" class="space-y-4 sm:space-y-5 panel-form {{ $activeTab !== 'login' ? 'panel-hidden' : '' }}">
         @csrf
-        <x-float-input id="login-email" name="email" type="email" label="Email address" :value="old('email')" required autocomplete="email">
+        <x-float-input id="login-email" name="email" type="email" label="Email address" :value="old('email')" required autocomplete="username" inputmode="email" autocapitalize="none" autocorrect="off" spellcheck="false">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
         </x-float-input>
 
@@ -71,38 +64,22 @@
     {{-- ═══ Register form ═══ --}}
     <form method="POST" action="{{ route('register') }}" data-panel="register" class="space-y-4 sm:space-y-5 panel-form {{ $activeTab !== 'register' ? 'panel-hidden' : '' }}">
         @csrf
-        @if ($googlePrefill)
-            {{-- Say plainly what just happened. Landing on a registration form
-                 you did not ask for, half filled in, is otherwise unnerving. --}}
-            <div class="flex items-start gap-3 rounded-xl border border-brand-500/30 bg-brand-500/10 px-3.5 py-3">
-                <svg class="mt-0.5 w-5 h-5 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
-                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05" />
-                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
-                </svg>
-                <div class="min-w-0 text-sm">
-                    <p class="font-bold text-fg">No account on this email yet</p>
-                    <p class="mt-0.5 text-xs text-fg-muted">
-                        Your name and email have been filled in from Google. Just add your <span class="font-semibold text-fg">phone number</span> and a
-                        <span class="font-semibold text-fg">password</span> to finish — no email verification needed.
-                    </p>
-                </div>
-            </div>
-        @endif
         {{-- Name + phone: side-by-side everywhere (50/50, mobile too) --}}
         <div class="grid grid-cols-2 gap-3 sm:gap-4">
-            <x-float-input id="r-name" name="name" label="Your name" :value="old('name', $googlePrefill['name'] ?? '')" required autocomplete="name">
+            <x-float-input id="r-name" name="name" label="Your name" :value="old('name')" required autocomplete="name">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 20a8 8 0 0116 0M12 12a4 4 0 100-8 4 4 0 000 8z"/></svg>
             </x-float-input>
 
-            <x-float-input id="r-phone" name="phone" type="tel" label="Phone number" :value="old('phone')" required autocomplete="tel">
+            {{-- data-bd-phone: tidied as it is typed, without ever touching text an
+                 IME is still composing (partials/bd-phone). maxlength is 14, not
+                 11, so a pasted "+8801712345678" fits before it is folded. --}}
+            <x-float-input id="r-phone" name="phone" type="tel" label="Phone number" :value="old('phone')" required inputmode="numeric" maxlength="14" data-bd-phone autocomplete="tel">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path stroke-linecap="round" d="M11 18h2"/></svg>
             </x-float-input>
         </div>
 
         {{-- Email: always full width --}}
-        <x-float-input id="r-email" name="email" type="email" label="Email address" :value="old('email', $googlePrefill['email'] ?? '')" required autocomplete="email">
+        <x-float-input id="r-email" name="email" type="email" label="Email address" :value="old('email')" required autocomplete="email" inputmode="email" autocapitalize="none" autocorrect="off" spellcheck="false">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
         </x-float-input>
 
@@ -131,6 +108,7 @@
     </form>
 
     @push('scripts')
+    @include('partials.bd-phone')
     <style>
         /* Panel animation styles */
         .panel-form {

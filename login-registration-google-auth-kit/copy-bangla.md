@@ -23,12 +23,18 @@ Nothing else changes — same markup, same classes, same behaviour.
 | `Show password` (aria) | `পাসওয়ার্ড দেখুন` |
 | `Forgot your password?` | `পাসওয়ার্ড ভুলে গেছেন?` |
 
-The Google prefill banner:
+## `frontend-blade/auth/google-phone.blade.php`
 
 | English | Bangla |
 |---|---|
-| `No account on this email yet` | `এই ইমেইলে আপনার অ্যাকাউন্ট নেই — চলুন খুলে ফেলি` |
-| `Your name and email have been filled in from Google. Just add your **phone number** and a **password** to finish — no email verification needed.` | `গুগল থেকে আপনার নাম ও ইমেইল নিয়ে বসিয়ে দেওয়া হয়েছে। শুধু **ফোন নম্বর** আর **পাসওয়ার্ড** দিলেই কাজ শেষ — ইমেইল যাচাই করতে হবে না।` |
+| `Your phone number` (title) | `ফোন নম্বর দিন` |
+| `Enter your phone number` | `আপনার ফোন নম্বর লিখুন` |
+| `Just this one step — then your account is ready.` | `আর মাত্র এই একটি ধাপ — তারপরই আপনার অ্যাকাউন্ট তৈরি।` |
+| `Your name` | `আপনার নাম` |
+| `Phone number` | `ফোন নম্বর` |
+| `Finish` | `সম্পন্ন করুন` |
+| `Want to use a different email?` | `অন্য ইমেইল ব্যবহার করতে চান?` |
+| `Use the regular form` | `সাধারণ ফর্মে যান` |
 
 ## `frontend-blade/partials/google-auth.blade.php`
 
@@ -41,6 +47,9 @@ The Google prefill banner:
 | `Google login is not configured yet.` | `Google লগইন এখনো কনফিগার করা হয়নি।` |
 | `No token received from Google.` | `Google থেকে টোকেন পাওয়া যায়নি।` |
 | `Google sign-in was cancelled.` | `Google সাইন-ইন বাতিল হয়েছে।` |
+| `The Google window was blocked. Allow pop-ups for this site and try again.` | `Google-এর উইন্ডোটি খুলতে দেওয়া হয়নি। এই সাইটের জন্য পপ-আপ চালু করে আবার চেষ্টা করুন।` |
+| `No connection. Check your internet and try again.` | `ইন্টারনেট সংযোগ নেই। সংযোগ দেখে আবার চেষ্টা করুন।` |
+| `This page has been open too long. Refresh it and try again.` | `পাতাটি অনেকক্ষণ খোলা ছিল। রিফ্রেশ করে আবার চেষ্টা করুন।` |
 | `Google sign-in failed.` | `Google সাইন-ইন ব্যর্থ হয়েছে।` |
 
 ## `backend-laravel/Http/Controllers/GoogleAuthController.php`
@@ -48,6 +57,15 @@ The Google prefill banner:
 | English | Bangla |
 |---|---|
 | `Google sign-in could not be verified. Please try again.` | `Google যাচাই ব্যর্থ হয়েছে। আবার চেষ্টা করুন।` |
+| `For your security the old password on this account was cancelled, because its email had never been verified. You can always sign in with Google; to use a password, set a new one from "Forgot your password?".` | `নিরাপত্তার জন্য এই অ্যাকাউন্টের পুরোনো পাসওয়ার্ডটি বাতিল করা হয়েছে, কারণ ইমেইলটি আগে কখনো যাচাই করা হয়নি। Google দিয়ে যেকোনো সময় ঢুকতে পারবেন; পাসওয়ার্ড দিয়ে ঢুকতে চাইলে "পাসওয়ার্ড ভুলে গেছেন" থেকে নতুন একটি সেট করুন।` |
+
+## `backend-laravel/Http/Controllers/GoogleAuthApiController.example.php`
+
+| English | Bangla |
+|---|---|
+| `Google sign-in has expired. Please sign in again.` | `Google যাচাইয়ের সময় শেষ। আবার লগইন করুন।` |
+| `Enter your name.` | `আপনার নাম দিন।` |
+| `This email is already registered. Please sign in.` | `এই ইমেইলটি ইতিমধ্যে নিবন্ধিত। অনুগ্রহ করে লগইন করুন।` |
 
 ## `admin-react/GoogleCredentialsPanel.tsx`
 
@@ -94,12 +112,13 @@ Step bodies, in full:
 4. `PUBLISH APP চেপে অবস্থা In production করুন। এই সাইট গুগলের কাছে শুধু নাম, ইমেইল ও ছবি চায় — তাই কোনো রিভিউয়ের অপেক্ষা নেই, চাপার সাথে সাথেই সবার জন্য চালু হয়ে যাবে।`
 5. `Clients তালিকা থেকে Client ID কপি করে এই পাতার ঘরে বসান, তারপর সংরক্ষণ করুন। এরপর লগইন পাতায় গিয়ে পরীক্ষা করে দেখুন।`
 
-## A note on the phone field
+## `backend-laravel/Support/Phone.php` — `messages()`
 
-The registration form ships with a plain `tel` input. For a Bangladeshi project,
-add the 11-digit normalise-and-validate rule (`01XXXXXXXXX`) on both sides, and
-these messages:
+| English | Bangla |
+|---|---|
+| `Enter your phone number.` | `ফোন নম্বর দিন।` |
+| `Enter a valid 11-digit phone number.` | `সঠিক ১১ সংখ্যার ফোন নম্বর দিন।` |
+| `Enter a valid Bangladeshi mobile number (e.g. 01712345678).` | `সঠিক বাংলাদেশি ফোন নম্বর দিন (যেমন: 01712345678)।` |
 
-- `ফোন নম্বর দিন।` — required
-- `সঠিক ১১ সংখ্যার ফোন নম্বর দিন।` — wrong length
-- `সঠিক বাংলাদেশি ফোন নম্বর দিন (যেমন: 01712345678)।` — wrong shape
+Registration messages worth translating in the project's own create-user path:
+`আপনার নাম দিন।` · `ইমেইল অ্যাড্রেস দিন।` · `এই ইমেইলটি ইতিমধ্যে নিবন্ধিত।`

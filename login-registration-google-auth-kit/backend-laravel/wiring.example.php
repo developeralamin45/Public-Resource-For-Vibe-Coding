@@ -60,24 +60,55 @@ return [
 // Add 'google_id' to $fillable. Nothing else changes.
 
 // =============================================================================
-// 5. The register view needs the pending profile
+// 5. The register route decides which page a visitor sees
 // =============================================================================
 //
 // Fortify: in app/Providers/FortifyServiceProvider.php boot() —
 //
 //     Fortify::loginView(fn () => view('auth.index', ['activeTab' => 'login']));
 //
-//     // A visitor sent here by "Continue with Google" arrives with a name and
-//     // email Google has verified, so the form starts filled in instead of
-//     // asking for what was just handed over.
-//     Fortify::registerView(fn () => view('auth.index', [
-//         'activeTab' => 'register',
-//         'googlePrefill' => \App\Support\GoogleAuth::pending(),
-//     ]));
+//     Fortify::registerView(function (Request $request) {
+//         // "Use a different email" on the last step: they would rather
+//         // register some other address, so the Google profile is let go and
+//         // the ordinary form comes back.
+//         if ($request->boolean('manual')) {
+//             \App\Support\GoogleAuth::forgetPending();
+//         }
 //
-// Breeze / a hand-rolled controller: pass the same 'googlePrefill' from
-// whichever action renders the registration page. The Blade defaults it to
-// null, so a login-only render needs no change.
+//         // A visitor sent here by "Continue with Google" has already given a
+//         // name and an email Google verified. All that is left to ask is the
+//         // phone number, so that is all the page asks.
+//         if ($google = \App\Support\GoogleAuth::pending()) {
+//             return view('auth.google-phone', ['google' => $google]);
+//         }
+//
+//         return view('auth.index', ['activeTab' => 'register']);
+//     });
+//
+// Breeze / a hand-rolled controller: put the same three branches in whichever
+// action renders the registration page. The ordinary form itself knows nothing
+// about Google.
+
+// =============================================================================
+// 5b. The keyboard script is a static file
+// =============================================================================
+//
+// frontend-blade/js/keyboard-aware.js → public/js/keyboard-aware.js
+// (layouts/auth.blade.php loads it with asset('js/keyboard-aware.js')). If the
+// project bundles its JS, import it from the bundle instead and drop that tag.
+
+// =============================================================================
+// 5c. A token-based SPA instead of Blade
+// =============================================================================
+//
+// Skip blocks 1 and 5. Use GoogleAuthApiController.example.php, in routes/api.php:
+//
+//     Route::post('/auth/google', [GoogleAuthApiController::class, 'auth'])
+//         ->middleware('throttle:20,1');
+//     Route::post('/auth/google/register', [GoogleAuthApiController::class, 'register'])
+//         ->middleware('throttle:10,1');
+//
+// and frontend-react/ for the button, the phone field and the in-app check.
 
 // =============================================================================
 // 6. The admin settings endpoint

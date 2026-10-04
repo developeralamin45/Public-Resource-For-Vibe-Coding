@@ -53,6 +53,14 @@
         </div>
     </div>
 
+    {{-- Spinner on the submit button, and no double submit. --}}
+    @include('partials.form-loading')
+
+    {{-- Keeps the focused field above the keyboard in browsers that do not —
+         Facebook's and Instagram's above all. Does nothing in Chrome and
+         Safari, which get it right. public/js/keyboard-aware.js. --}}
+    <script src="{{ asset('js/keyboard-aware.js') }}" defer></script>
+
     @stack('scripts')
 </body>
 </html>
