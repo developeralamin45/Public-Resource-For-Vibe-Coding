@@ -26,7 +26,9 @@ server references for Node, Laravel and WordPress · zero dependencies · MIT.**
   right claim, and the amount tolerances that approve ৳1,020 on a ৳1,000
   order but hold ৳5,000. Runnable, tested.
 - **The parts a screenshot cannot show**: the Facebook-in-app-browser
-  keyboard fix, Bangla-IME-safe inputs, a reference field that is *never*
+  keyboard fix — with a headless test that fakes Facebook's browser, an
+  honest WebView and Chrome, and can be pointed at a popup you already have
+  (RECIPE §7a) — Bangla-IME-safe inputs, a reference field that is *never*
   prefilled, refresh-proof popups, enter-to-submit, close-asks-first, and a
   rule that `Purchase` fires from the server when money is confirmed —
   never from the browser on Submit.
@@ -67,6 +69,8 @@ node --test server/node/             # the matching + tolerance rules
 README.md · RECIPE.md · LICENSE
 checkout.css            ← ONE stylesheet, verbatim production, shared by both variants
 keyboard-aware.js       ← soft-keyboard survival kit (page-level, framework-agnostic)
+ime-input.js            ← the Bangla-IME rule + an honest enter key, for any other field that corrects itself
+tools/keyboard/         ← kbtest.mjs (the kit, 48 checks) · popuptest.mjs (YOUR popup, through all three hosts)
 assets/                 ← bkash / nagad / rocket logos (bank draws its own tile)
 react/                  ← SendMoneyCheckout · SendMoneyPopup · useSendMoneyCheckout · payment · labels · bdPhone · useImeInput · icons · demo/
 vanilla/                ← send-money-checkout.js · bd-phone.js · demo.html

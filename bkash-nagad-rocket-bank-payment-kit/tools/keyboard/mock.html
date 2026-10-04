@@ -1,0 +1,40 @@
+<!doctype html><html lang="bn"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  *{box-sizing:border-box} body{margin:0;font:14px system-ui}
+  .page{padding:20px} .tall{height:1400px;background:#eef}
+  .pay-overlay{position:fixed;inset:0;z-index:300;display:flex;align-items:flex-start;
+    justify-content:center;padding:16px;background:rgba(15,16,33,.55)}
+  .pay-modal{position:relative;display:flex;flex-direction:column;overflow:hidden;width:100%;
+    max-width:420px;max-height:calc(100vh - 32px);background:#fff;border-radius:26px}
+  .pay-scroll{overflow-y:auto;min-height:0;overscroll-behavior:contain}
+  .pay-header{padding:10px 14px;background:#e2136e;color:#fff;height:64px}
+  .pay-body{padding:10px 14px 12px}
+  .blk{height:110px;background:#f6f7fb;border-radius:12px;margin-bottom:10px}
+  .pay-label{margin:8px 0 4px;font-weight:700}
+  .pay-input{scroll-margin-bottom:112px;scroll-margin-top:32px;width:100%;padding:11px 14px;
+    border:2px solid #e2e8f0;border-radius:13px;font-size:1.05rem}
+  .pay-submit{width:100%;margin-top:10px;padding:11px;border:none;border-radius:13px;
+    background:#e2136e;color:#fff;font-size:1.05rem;font-weight:800}
+  html[data-kb] .pay-overlay{align-items:flex-start;padding-top:calc(16px + var(--kb-top,0px))}
+  html[data-kb] .pay-modal{max-height:calc(var(--kb-vh,100vh) - 32px)}
+  #pagefield{margin-top:1100px;width:100%;padding:12px;scroll-margin-top:15vh}
+</style></head><body>
+<div class="page"><h1>Mock</h1><div class="tall"></div><input id="pagefield" placeholder="page field"></div>
+<div class="pay-overlay" id="ov"><div class="pay-modal" id="card"><div class="pay-scroll" id="scroll">
+  <div class="pay-header">বিকাশ সেন্ড মানি করুন</div>
+  <div class="pay-body">
+    <div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div>
+    <div class="pay-label">আপনি যে নম্বর থেকে টাকা পাঠিয়েছেন</div>
+    <input class="pay-input" id="ref" type="tel" inputmode="numeric" placeholder="01XXXXXXXXX">
+    <button class="pay-submit" id="submit">সাবমিট করুন</button>
+  </div>
+</div></div></div>
+<div id="sheetwrap" hidden style="position:fixed;inset:0;z-index:400;display:flex;align-items:flex-end;justify-content:center">
+  <div id="sheet" style="width:100%;overflow-y:auto;background:#fff;padding:24px;
+       max-height:calc(var(--kb-vh, 92vh) - 24px);margin-bottom:var(--kb-reserve, 0px)">
+    <div class="blk"></div><div class="blk"></div><div class="blk"></div>
+    <input class="pay-input" id="sheetref" type="tel" placeholder="TrxID">
+    <button class="pay-submit" id="sheetsubmit">জমা দিন</button>
+  </div></div>
+</body></html>

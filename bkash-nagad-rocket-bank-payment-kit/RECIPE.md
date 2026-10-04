@@ -80,6 +80,9 @@ Decide these before you copy anything, and say what you decided:
 ```
 checkout.css              ONE stylesheet, both variants — verbatim from production; do not edit numbers
 keyboard-aware.js         soft-keyboard kit. Include ONCE per page (index.html / layout), any page with a form
+ime-input.js              the IME rule for every OTHER field that rewrites its value (phone, TrxID, coupon) + an
+                          honest enter key (data-enter="next|done"). React: react/useImeInput.ts
+tools/keyboard/           the tests: kbtest.mjs (the kit file, 48 checks) · popuptest.mjs (YOUR popup, any page)
 assets/{bkash,nagad,rocket}.webp   the logos (bank draws its own tile)
 
 react/
@@ -259,7 +262,7 @@ variants; keep them when adapting.
   band and scrolls the field's *bottom* (plus its `scroll-margin-bottom`,
   the submit button) to the foot of that band — never a landing line at the
   top, never by adding padding. Read its header before touching it; run its
-  tests if you do (`tools/keyboard` in the origin repo).
+  tests if you do (`node tools/keyboard/kbtest.mjs` — tools/keyboard/README.md).
 - **The page gets room and a landing line only for a GUESSED keyboard**
   (`html[data-kb-guess]`, Facebook's browser). Chrome 108+ on Android and
   iOS Safari shrink only the *visual* viewport, so the kit measures the
@@ -297,6 +300,60 @@ variants; keep them when adapting.
   checkout section is in the upper half of the screen, waits 1.2 s after
   paint, and is gone while the popup is open.
 
+## 7a. Fitting the keyboard kit to a popup you already have
+
+The kit's own popup is already the right shape. Most projects you are asked
+to fix are not starting from it: they have a send-money popup of their own,
+and the bug report is "in Facebook's browser the keyboard covers the number
+field". Do not rewrite their popup into the kit's. Give it the kit's
+**contract** — four structural facts `keyboard-aware.js` is built to find —
+and keep its look. Founders.com.bd did exactly this (2026-10-04); its old
+popup grew padding to make room, which left a white band under the button
+whenever the keyboard was put away with the chevron.
+
+1. **A fixed overlay that does not scroll itself**, flex, with the card
+   **top-aligned on phones always** (`@media (max-width:640px)`) and under a
+   keyboard (`html[data-kb]`), padded by `var(--kb-top)` for adjustPan hosts.
+   Facebook's browser reports nothing, so the card's place at rest is the
+   only place it has — centred is centred behind the keyboard.
+2. **A card capped to the screen**: `display:flex; flex-direction:column;
+   overflow:hidden; max-height: calc(100vh - 32px)` (then a `100dvh` line),
+   and `html[data-kb] .card { max-height: calc(var(--kb-vh, 100vh) - 32px) }`
+   — **pixels from the kit, never `dvh`** under the keyboard: an older
+   in-app browser drops the whole declaration over an unknown unit.
+3. **A scroller of its own inside the card**, wrapping everything that
+   scrolls (header included if it scrolls): `overflow-y:auto; min-height:0;
+   overscroll-behavior:contain`. This is what the kit finds (`panelFor`) and
+   scrolls; `min-height:0` or the flex item never shrinks and the button is
+   clipped.
+4. **The field asks to keep what is under it**: `scroll-margin-bottom`
+   covering the error line and the button (112px for the kit's layout),
+   `scroll-margin-top` for its label, and `font-size:16px` — smaller and iOS
+   zooms on focus, which shrinks the visual viewport exactly like a
+   keyboard and makes the kit stand down.
+
+And three things to **remove**: any `padding-bottom: var(--kb-reserve)` (or
+JS-added padding) used to "make room"; any focus-time `scrollIntoView`
+(it fights the browser and fires on every keyboard resize); and a second
+copy of the kit (two copies fight over one scroll).
+
+The validation jump to a skipped page field is
+`focus({ preventScroll: true })` then `scrollIntoView({ block: 'start' })` —
+instant, never smooth, never centred.
+
+Then **prove it on the project's real page**, not the mock:
+
+```bash
+PAGE=saved-checkout.html OPEN="openPaymentPopup('bkash')" \
+CARD='.pay-card' SCROLL='.pay-card-scroll' FIELD='#sender' SUBMIT='#pay-submit' \
+node tools/keyboard/popuptest.mjs
+```
+
+It fakes Facebook's browser, an honest WebView and Chrome, and fails on a
+field or button below the keyboard, padding, dead space, drift, movement
+mid-composition, or a guess over an honest host. Founders' popup went
+16/16 (card 581 → 378 px, field and button above a 380 px keyboard).
+
 ## 8. Verify after implementing
 
 Desktop / Chrome (`node server/node/demo-server.js` shows the expected
@@ -319,15 +376,18 @@ behaviour side by side):
    rows, copy-all, no tabs, one check, primary continue button.
 7. The same `curl` twice → the same reply, one approval.
 8. `Purchase` is nowhere in the browser bundle.
+9. `node tools/keyboard/kbtest.mjs` is 48/48 on the copy of
+   `keyboard-aware.js` you shipped (`KIT=path/to/it`), and
+   `tools/keyboard/popuptest.mjs` passes on your rendered checkout (§7a).
 
 On the phone — **inside the Facebook app's browser, not just Chrome**
 (share the URL to yourself on Messenger):
 
-9. Tap the reference field: within a second the field AND the submit
+10. Tap the reference field: within a second the field AND the submit
    button sit above the keyboard; no jumping while typing with a Bangla
    keyboard; the page stays where you scroll it; the keyboard's enter
    submits.
-10. In Chrome and Safari too: tap the checkout's name and phone fields and
+11. In Chrome and Safari too: tap the checkout's name and phone fields and
     type a few letters. The field stays where the browser put it, never
     jumping to the top edge, and no white band appears under the form once
     the keyboard goes.
