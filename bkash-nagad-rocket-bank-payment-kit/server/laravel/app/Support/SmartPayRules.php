@@ -31,6 +31,8 @@ final class SmartPayRules
     {
         $d = preg_replace('/\D/', '', self::toAsciiDigits((string) $raw));
         if (str_starts_with($d, '00')) $d = substr($d, 2);
+        // "+880 01712…": the country code in front of a number that kept its 0.
+        if (str_starts_with($d, '8800')) $d = preg_replace('/^0+/', '0', substr($d, 3));
         if (str_starts_with($d, '8801')) $d = substr($d, 2);
         elseif (str_starts_with($d, '881')) $d = '0' . substr($d, 2);
         elseif (preg_match('/^1[3-9]/', $d)) $d = '0' . $d;

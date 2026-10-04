@@ -288,7 +288,8 @@ variants; keep them when adapting.
   jumps the instant it says "received" reads as though it had not.
 - **Body scroll is locked while the popup is open**; unlocked on close.
 - **Wallet `maxLength` is unset**: the browser clips a paste *before* any
-  script sees it; `+880 1712-345678` must arrive whole and be folded to 11
+  script sees it; `+880 1712-345678` (or `+880 01712-345678`, code and zero
+  both) must arrive whole and be folded to 11
   digits by the normaliser.
 - **The done card tells the truth**: a claim the money has not confirmed
   says "টাকাটা এখনো পৌঁছায়নি" with "পাঠিয়েছি, আবার দেখুন" — never "done".

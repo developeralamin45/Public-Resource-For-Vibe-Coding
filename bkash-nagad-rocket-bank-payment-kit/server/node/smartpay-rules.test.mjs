@@ -10,7 +10,8 @@ const claim = (over) => ({ id: 'c1', status: 'pending', method: 'bkash', referen
 const payment = (over) => ({ amount: 2950, txnId: 'DIF8IFIRKK', txnSynthetic: false, gateway: 'BKASH', method: 'bkash', sender: '01712345678', senderPrefix: '', senderSuffix: '', tolerance: R.DEFAULT_TOLERANCE, ...over });
 
 test('phone: every spelling folds to 01XXXXXXXXX', () => {
-    for (const raw of ['+880 1712-345678', '০১৭১২৩৪৫৬৭৮', '8801712345678', '1712345678', '01712 345 678।'])
+    for (const raw of ['+880 1712-345678', '০১৭১২৩৪৫৬৭৮', '8801712345678', '1712345678', '01712 345 678।',
+        '+880 01712-345678', '0088 01712 345678', '+88 01712345678'])
         assert.equal(R.normalizeBdPhone(raw), '01712345678', raw);
     assert.equal(R.isValidBdPhone('01212345678'), false);
 });

@@ -29,6 +29,8 @@ function toAsciiDigits(s) {
 function normalizeBdPhone(raw) {
     let d = toAsciiDigits(raw).replace(/\D/g, '');
     if (d.startsWith('00')) d = d.slice(2);
+    // "+880 01712…": the country code in front of a number that kept its 0.
+    if (d.startsWith('8800')) d = d.slice(3).replace(/^0+/, '0');
     if (d.startsWith('8801')) d = d.slice(2);
     else if (d.startsWith('881')) d = '0' + d.slice(2);
     else if (/^1[3-9]/.test(d)) d = '0' + d;
