@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meta Pixel kit — demo</title>
+<style>
+    :root { color-scheme: light dark; --line: #8884; --ok: #1a7f37; --warn: #b35900; }
+    body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 16px; max-width: 980px; margin-inline: auto; }
+    h1 { font-size: 20px; margin: 0 0 4px; } h2 { font-size: 15px; margin: 20px 0 8px; }
+    p.sub { margin: 0 0 12px; opacity: .75; }
+    button { font: inherit; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer; }
+    button:disabled { opacity: .4; cursor: default; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+    .log { border: 1px solid var(--line); border-radius: 8px; padding: 8px; min-height: 120px; font: 12px/1.5 ui-monospace, monospace; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+    .log b { color: var(--ok); } .log i { color: var(--warn); font-style: normal; }
+    .card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-top: 8px; }
+    label { margin-right: 12px; }
+</style>
+</head>
+<body>
+<h1>Meta Pixel kit — demo</h1>
+<p class="sub">Nothing here reaches Facebook: the pixel script is a stub and the Conversions API is this server. Left is what the <b>browser</b> fired, right is what <b>Meta received from the server</b>. Matching event ids are one event, counted once.</p>
+
+<h2>1 · Funnel events (browser + server, same event_id)</h2>
+<div class="row">
+    <button data-ev="viewContent">ViewContent</button>
+    <button data-ev="addToCart">AddToCart</button>
+    <button data-ev="initiateCheckout">InitiateCheckout</button>
+    <button data-ev="lead">Lead</button>
+    <button data-ev="contact">Contact</button>
+</div>
+
+<h2>2 · Place an order — the payment method decides when Purchase fires</h2>
+<div class="row" id="methods">
+    <label><input type="radio" name="method" value="cod" checked> Cash on delivery <small>(on_order)</small></label>
+    <label><input type="radio" name="method" value="card"> Card / gateway <small>(on_payment)</small></label>
+    <label><input type="radio" name="method" value="send_money"> Send money by hand <small>(on_confirm)</small></label>
+</div>
+<div class="row" style="margin-top:8px">
+    <button id="place">Place order</button>
+    <button id="callback" disabled>Gateway callback arrives</button>
+    <button id="confirm" disabled>Admin confirms the money</button>
+</div>
+<div class="card" id="order">No order yet.</div>
+
+<div class="cols">
+    <div><h2>Browser (fbq)</h2><div class="log" id="browserLog"></div></div>
+    <div><h2>Meta received (Conversions API)</h2><div class="log" id="serverLog"></div></div>
+</div>
+
+<script src="/meta-pixel.js"></script>
+<script>
+(async function () {
+    const $ = (id) => document.getElementById(id);
+    const PRODUCT = { content_ids: ['sku-7'], content_type: 'product', content_name: 'Demo product', value: 950, currency: 'BDT' };
+    let order = null;
+
+    const method = () => document.querySelector('input[name=method]:checked').value;
+    const config = await (await fetch('/api/config')).json();
+    const policyOf = (m) => config.policy.methods[m] || config.policy.default;
+
+    // A real site has ONE policy (or one per payment method known at init).
+    // The demo re-inits when the method changes so all three can be shown.
+    function boot() {
+        MetaPixel._reset();
+        MetaPixel.init({ pixelId: config.pixelId, purchasePolicy: policyOf(method()), relayUrl: '/api/meta/event', scriptUrl: '/fbevents-stub.js', lazy: false, debug: true, autoPageView: !window.__booted });
+        window.__booted = true;
+    }
+    boot();
+    $('methods').addEventListener('change', boot);
+
+    document.querySelectorAll('[data-ev]').forEach((b) => b.addEventListener('click', () => {
+        MetaPixel[b.dataset.ev](PRODUCT, { user: { phone: '01712345678' } });
+        setTimeout(refresh, 300);
+    }));
+
+    async function post(url, body) { return (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })).json(); }
+
+    $('place').addEventListener('click', async () => {
+        order = await post('/api/orders', { method: method(), name: 'Rahim Uddin', phone: '01712345678', attribution: MetaPixel.attribution() });
+        // One call site, right under every policy: Purchase where the browser
+        // may fire it (the server issued an id), AddPaymentInfo where it may not.
+        MetaPixel.orderSubmitted(order.customData, { purchaseEventId: order.purchaseEventId, eventId: 'add_payment_info.' + order.ref, user: { phone: '01712345678' } });
+        show(); setTimeout(refresh, 300);
+    });
+    // The gateway's success page: the server has verified the payment and
+    // hands the page the Purchase id; the browser fires its copy.
+    $('callback').addEventListener('click', async () => {
+        order = await post(`/api/orders/${order.ref}/gateway-callback`);
+        if (order.purchaseEventId) MetaPixel.purchase(order.customData, order.purchaseEventId);
+        show(); setTimeout(refresh, 300);
+    });
+    $('confirm').addEventListener('click', async () => { order = await post(`/api/orders/${order.ref}/confirm`); show(); refresh(); });
+
+    function show() {
+        $('order').textContent = `Order ${order.ref} · ${order.method} · policy ${order.policy} · status ${order.status} · Purchase ${order.purchaseSentAt ? 'SENT to Meta' : 'not sent yet'}`;
+        $('callback').disabled = order.policy !== 'on_payment';
+        $('confirm').disabled = false;
+    }
+
+    const line = (name, id) => (name === 'Purchase' ? '<b>Purchase</b>' : name) + '  <i>' + (id || '') + '</i>';
+    function renderBrowser() {
+        $('browserLog').innerHTML = (window.__fbqCalls || []).filter((c) => c[0] !== 'init')
+            .map((c) => line(c[1], c[3] && c[3].eventID)).join('\n');
+    }
+    async function refresh() {
+        renderBrowser();
+        const events = await (await fetch('/debug/meta')).json();
+        $('serverLog').innerHTML = events.map((e) => line(e.event_name, e.event_id) + (e.custom_data && e.custom_data.value ? '  ৳' + e.custom_data.value : '')).join('\n');
+    }
+    window.addEventListener('fbq', renderBrowser);
+    refresh();
+})();
+</script>
+</body>
+</html>
